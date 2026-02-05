@@ -1,5 +1,4 @@
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { reportService } from '../../services/ReportService';
 import { useEffect, useState } from 'react';
 
 export default function StockReports() {

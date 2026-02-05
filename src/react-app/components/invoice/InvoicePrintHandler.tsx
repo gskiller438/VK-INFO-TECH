@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
-import InvoiceTemplate, { CompanyDetails, InvoiceData } from './InvoiceTemplate';
+import InvoiceTemplate from './InvoiceTemplate';
+import { CompanyDetails, InvoiceData } from '../../types';
 import { flushSync } from 'react-dom';
 
 export const handlePrintInvoice = (company: CompanyDetails, data: InvoiceData) => {

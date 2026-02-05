@@ -37,7 +37,7 @@ export default function FinancialReports() {
                                     ))}
                                 </Pie>
                                 <Tooltip
-                                    formatter={(value: number) => `₹${(value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                                    formatter={(value: any) => `₹${(value || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
                                     contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                     itemStyle={{ color: '#1f2937' }}
                                 />

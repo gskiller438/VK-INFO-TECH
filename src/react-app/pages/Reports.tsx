@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, Filter } from 'lucide-react';
+import { Filter } from 'lucide-react';
 import ReportSummary from '../components/reports/ReportSummary';
 import SalesReports from '../components/reports/SalesReports';
 import ProductReports from '../components/reports/ProductReports';

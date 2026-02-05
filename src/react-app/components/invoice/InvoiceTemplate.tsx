@@ -1,7 +1,4 @@
-import { CompanyDetails, InvoiceData } from './InvoiceTemplate';
-
-// Re-export type definitions so they can be imported from here
-export type { CompanyDetails, InvoiceData };
+import { CompanyDetails, InvoiceData, InvoiceProduct } from '../../types';
 
 interface InvoiceTemplateProps {
     company: CompanyDetails;
@@ -103,7 +100,7 @@ export default function InvoiceTemplate({ company, data }: InvoiceTemplateProps)
                     </div>
 
                     {/* Rows */}
-                    {data.products.map((item, index) => (
+                    {data.products.map((item: InvoiceProduct, index: number) => (
                         <div key={index} className="flex border-b border-black text-xs h-8 items-center">
                             <div className="w-[8%] border-r border-black h-full flex items-center justify-center">{item.sNo}</div>
                             <div className="w-[42%] border-r border-black h-full flex items-center px-2 text-left bg-white relative z-10">{item.description}</div>

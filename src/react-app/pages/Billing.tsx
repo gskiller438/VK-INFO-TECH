@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Plus, Trash2, Save, Printer } from 'lucide-react';
 import { handlePrintInvoice } from '../components/invoice/InvoicePrintHandler';
-import { CompanyDetails, InvoiceData } from '../components/invoice/InvoiceTemplate';
+import { CompanyDetails, InvoiceData } from '../types';
 import { generateInvoicePDF, InvoiceData as PDFInvoiceData } from '../services/PDFService';
 import { productService, Product as InventoryProduct } from '../services/ProductService';
 
@@ -296,11 +296,7 @@ export default function Billing() {
       roundOff,
       grandTotal,
       amountInWords: numberToWords(grandTotal),
-      termsAndConditions: [
-        'Goods once sold will not be taken back.',
-        'Interest @ 24% p.a. will be charged if bill is not paid within due date.',
-        'All disputes subject to Bangalore Jurisdiction.'
-      ],
+
       paidAmount,
       balance: balanceAmount
     };

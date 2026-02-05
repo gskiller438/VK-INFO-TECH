@@ -1,4 +1,4 @@
-import { type Invoice, type Customer, type Product } from '../components/types'; // Assuming types are moved here or I will redefine local ones for now and refactor later if needed to shared types.
+import { type Invoice, type Customer, type Product } from '../types';
 
 // Redefining types based on Billing.tsx usage for independence, or I can check types.ts
 // Let's check shared/types.ts first in the next step, but for now I'll implement with generic 'any' or defined interfaces then align.
@@ -21,7 +21,7 @@ export interface SalesReportParams {
 }
 
 export class ReportService {
-    private getInvoices(): any[] {
+    private getInvoices(): Invoice[] {
         try {
             return JSON.parse(localStorage.getItem('invoices') || '[]');
         } catch {
@@ -29,7 +29,7 @@ export class ReportService {
         }
     }
 
-    private getCustomers(): any[] {
+    private getCustomers(): Customer[] {
         try {
             return JSON.parse(localStorage.getItem('customers') || '[]');
         } catch {
@@ -64,8 +64,8 @@ export class ReportService {
         // I'll try to read 'products' from localStorage, assuming the Products page saves there.
         let stockValue = 0;
         try {
-            const products = JSON.parse(localStorage.getItem('products') || '[]');
-            stockValue = products.reduce((sum: number, p: any) => sum + ((p.price || 0) * (p.stock || 0)), 0);
+            const products: Product[] = JSON.parse(localStorage.getItem('products') || '[]');
+            stockValue = products.reduce((sum: number, p: Product) => sum + ((p.price || 0) * (p.stock || 0)), 0);
         } catch { }
 
         return {
