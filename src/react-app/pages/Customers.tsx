@@ -136,7 +136,6 @@ export default function Customers() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [selectedCustomerInvoices] = useState<Invoice[]>([]);
   const [isUpdateSuccess, setIsUpdateSuccess] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
 
@@ -190,14 +189,12 @@ export default function Customers() {
 
     try {
       // Sort invoices by date (newest first)
-      const sortedInvoices = [...invoices].sort((a, b) =>
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      );
-
-      // Prepare all invoice data
-      const allPrintData = sortedInvoices.map(inv =>
-        mapInvoiceToPrintData(inv, customer, companyDetails)
-      );
+      // Prepare all invoice data (sorted by date, newest first)
+      const allPrintData = [...invoices]
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .map(inv =>
+          mapInvoiceToPrintData(inv, customer, companyDetails)
+        );
 
       // Use background PDF generator - downloads as ZIP file
       // This runs completely in the background without rendering any UI
@@ -1068,79 +1065,92 @@ export default function Customers() {
               </div>
 
               {/* Invoice History */}
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold text-gray-800">Invoice History</h3>
-                <button
-                  onClick={() => selectedCustomer && handleDownloadAllPDF(selectedCustomer, selectedCustomerInvoices)}
-                  disabled={isBatchDownloading || selectedCustomerInvoices.length === 0}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-white transition-all
+              {(() => {
+                // Compute invoices for the selected customer
+                const currentCustomerInvoices = selectedCustomer ? customerInvoices.filter(inv =>
+                  inv.customerId === selectedCustomer.id ||
+                  (inv.customerPhone && inv.customerPhone === selectedCustomer.phone) ||
+                  (!inv.customerId && inv.customerName === selectedCustomer.name)
+                ) : [];
+
+                return (
+                  <>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-bold text-gray-800">Invoice History</h3>
+                      <button
+                        onClick={() => selectedCustomer && handleDownloadAllPDF(selectedCustomer, currentCustomerInvoices)}
+                        disabled={isBatchDownloading || currentCustomerInvoices.length === 0}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-white transition-all
                      ${isBatchDownloading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-md hover:scale-105'}
                    `}
-                >
-                  {isBatchDownloading ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                      <span>Processing {batchProgress.current}/{batchProgress.total}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Layers size={18} />
-                      <span>Download All Bills</span>
-                    </>
-                  )}
-                </button>
-              </div>
-              {selectedCustomerInvoices.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  No purchase history found
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200">
-                        <th className="text-left py-3 px-3 text-gray-600 font-bold">Invoice No</th>
-                        <th className="text-left py-3 px-3 text-gray-600 font-bold">Date</th>
-                        <th className="text-left py-3 px-3 text-gray-600 font-bold">Amount</th>
-                        <th className="text-left py-3 px-3 text-gray-600 font-bold">Paid</th>
-                        <th className="text-left py-3 px-3 text-gray-600 font-bold">Balance</th>
-                        <th className="text-left py-3 px-3 text-gray-600 font-bold">Payment Mode</th>
-                        <th className="text-center py-3 px-3 text-gray-600 font-bold">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedCustomerInvoices.map((invoice) => (
-                        <tr key={invoice.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                          <td className="py-3 px-3 text-gray-800 font-semibold">{invoice.invoiceNumber}</td>
-                          <td className="py-3 px-3 text-gray-600">{invoice.date}</td>
-                          <td className="py-3 px-3 text-gray-800 font-bold">₹{invoice.amount.toLocaleString()}</td>
-                          <td className="py-3 px-3 text-green-600">₹{invoice.paidAmount.toLocaleString()}</td>
-                          <td className="py-3 px-3">
-                            <span className={invoice.balance > 0 ? 'text-red-600 font-bold' : 'text-green-600'}>
-                              ₹{invoice.balance.toLocaleString()}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 text-gray-600">{invoice.paymentMode}</td>
-                          <td className="py-3 px-3 text-center">
-                            <button
-                              onClick={() => selectedCustomer && handleDownloadPDF(invoice, selectedCustomer)}
-                              disabled={downloadingInvoiceId === invoice.id || isBatchDownloading}
-                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
-                              title="Download PDF"
-                            >
-                              {downloadingInvoiceId === invoice.id ? (
-                                <div className="w-4 h-4 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
-                              ) : (
-                                <Download size={18} />
-                              )}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                      >
+                        {isBatchDownloading ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                            <span>Processing {batchProgress.current}/{batchProgress.total}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Layers size={18} />
+                            <span>Download All Bills</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    {currentCustomerInvoices.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        No purchase history found
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="bg-gray-50 border-b border-gray-200">
+                              <th className="text-left py-3 px-3 text-gray-600 font-bold">Invoice No</th>
+                              <th className="text-left py-3 px-3 text-gray-600 font-bold">Date</th>
+                              <th className="text-left py-3 px-3 text-gray-600 font-bold">Amount</th>
+                              <th className="text-left py-3 px-3 text-gray-600 font-bold">Paid</th>
+                              <th className="text-left py-3 px-3 text-gray-600 font-bold">Balance</th>
+                              <th className="text-left py-3 px-3 text-gray-600 font-bold">Payment Mode</th>
+                              <th className="text-center py-3 px-3 text-gray-600 font-bold">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {currentCustomerInvoices.map((invoice: Invoice) => (
+                              <tr key={invoice.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                                <td className="py-3 px-3 text-gray-800 font-semibold">{invoice.invoiceNumber}</td>
+                                <td className="py-3 px-3 text-gray-600">{invoice.date}</td>
+                                <td className="py-3 px-3 text-gray-800 font-bold">₹{invoice.amount.toLocaleString()}</td>
+                                <td className="py-3 px-3 text-green-600">₹{invoice.paidAmount.toLocaleString()}</td>
+                                <td className="py-3 px-3">
+                                  <span className={invoice.balance > 0 ? 'text-red-600 font-bold' : 'text-green-600'}>
+                                    ₹{invoice.balance.toLocaleString()}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-3 text-gray-600">{invoice.paymentMode}</td>
+                                <td className="py-3 px-3 text-center">
+                                  <button
+                                    onClick={() => selectedCustomer && handleDownloadPDF(invoice, selectedCustomer)}
+                                    disabled={downloadingInvoiceId === invoice.id || isBatchDownloading}
+                                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                                    title="Download PDF"
+                                  >
+                                    {downloadingInvoiceId === invoice.id ? (
+                                      <div className="w-4 h-4 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
+                                    ) : (
+                                      <Download size={18} />
+                                    )}
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>
