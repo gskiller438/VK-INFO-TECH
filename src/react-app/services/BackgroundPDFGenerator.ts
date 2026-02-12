@@ -157,7 +157,6 @@ export const downloadBatchInvoicesPDF = async (
                 for (let page = 1; page <= pageCount; page++) {
                     pdf.setPage(page);
                     combinedPdf.addPage();
-                    const imgData = pdf.output('dataurlstring', { compress: true });
                     // Note: This is a simplified merge. For production, consider using pdf-lib
                 }
             }

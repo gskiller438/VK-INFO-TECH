@@ -136,7 +136,7 @@ export default function Customers() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [selectedCustomerInvoices, setSelectedCustomerInvoices] = useState<Invoice[]>([]);
+  const [selectedCustomerInvoices] = useState<Invoice[]>([]);
   const [isUpdateSuccess, setIsUpdateSuccess] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
 
@@ -393,14 +393,8 @@ export default function Customers() {
       (!inv.customerId && inv.customerName === customer.name)
     );
 
-    // If customer has invoices, navigate to the first one
-    // Otherwise, show alert
+    // Navigate to bill list showing all bills
     if (invoices.length > 0) {
-      // Sort by date to show most recent first
-      const sortedInvoices = invoices.sort((a, b) =>
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      );
-      // Navigate to bill list showing all bills
       navigate(`/customers/${customer.id}/bills`);
     } else {
       alert('No bills found for this customer');
