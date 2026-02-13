@@ -1,3 +1,5 @@
+import { authService } from './AuthService';
+
 export interface StockLog {
     id: string;
     productId: string;
@@ -10,27 +12,53 @@ export interface StockLog {
     remarks: string;
     updatedBy: string;
     dateTime: string;
+    branch?: string;
 }
 
 class StockService {
-    private STORAGE_KEY = 'stock_logs';
+    private API_URL = 'http://localhost:5000/api/stock-logs';
 
-    getAllLogs(): StockLog[] {
+    async getAllLogs(): Promise<StockLog[]> {
         try {
-            return JSON.parse(localStorage.getItem(this.STORAGE_KEY) || '[]');
-        } catch {
+            const response = await fetch(this.API_URL);
+            if (!response.ok) throw new Error('Failed to fetch logs');
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching stock logs:', error);
             return [];
         }
     }
 
-    addLog(log: StockLog): void {
-        const logs = this.getAllLogs();
-        logs.unshift(log); // Add to top
-        localStorage.setItem(this.STORAGE_KEY, JSON.stringify(logs));
+    async addLog(log: Omit<StockLog, 'id' | 'dateTime' | 'updatedBy' | 'branch'>): Promise<void> {
+        try {
+            const user = authService.getCurrentUser();
+            const newLog = {
+                ...log,
+                id: `L${Date.now()}`,
+                dateTime: new Date().toLocaleString('en-IN'),
+                updatedBy: user?.username || 'System',
+                branch: user?.branch || 'Main'
+            };
+
+            await fetch(this.API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newLog)
+            });
+        } catch (error) {
+            console.error('Error adding stock log:', error);
+        }
     }
 
-    getLogsByProduct(productId: string): StockLog[] {
-        return this.getAllLogs().filter(log => log.productId === productId);
+    async getLogsByProduct(productId: string): Promise<StockLog[]> {
+        try {
+            const response = await fetch(`${this.API_URL}/product/${productId}`);
+            if (!response.ok) throw new Error('Failed to fetch product logs');
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching logs by product:', error);
+            return [];
+        }
     }
 }
 

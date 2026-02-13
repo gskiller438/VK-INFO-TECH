@@ -5,6 +5,9 @@ import { handlePrintInvoice, generateInvoicePDF } from '../components/invoice/In
 import { CompanyDetails, InvoiceData } from '../types';
 import { productService, Product as InventoryProduct } from '../services/ProductService';
 import { stockService, StockLog } from '../services/StockService';
+import { customerService } from '../services/CustomerService';
+import { BillingAPI } from '../services/BillingAPI';
+import { CustomerBillsAPI } from '../services/CustomerBillsAPI';
 
 interface Product {
   id: string;
@@ -58,7 +61,7 @@ export default function Billing() {
   const [companyDetails] = useState<CompanyDetails>(() => {
     const savedDetails = localStorage.getItem('companySettings');
     return savedDetails ? JSON.parse(savedDetails) : {
-      name: 'VK Info TECH',
+      name: 'VK INFOTECH',
       tagline: 'Complete Technology Solution Provider',
       address: 'No.1, Kumaravel Complex, Koneripatti, Rasipuram, Namakkal - 637408',
       mobile: '+91 99445 51256',
@@ -99,7 +102,11 @@ export default function Billing() {
 
   // Load products on mount
   useEffect(() => {
-    setAvailableProducts(productService.getAllProducts());
+    const fetchProducts = async () => {
+      const products = await productService.getAllProducts();
+      setAvailableProducts(products);
+    };
+    fetchProducts();
   }, []);
 
   // Helper to handle product selection from dropdown
@@ -208,10 +215,12 @@ export default function Billing() {
   // Calculations
   const subtotal = products.reduce((sum, p) => sum + p.amount, 0);
   const totalGstAmount = (subtotal * gstRate) / 100;
-  const sgst = (subtotal * sgstRate) / 100;
-  const cgst = (subtotal * cgstRate) / 100;
-  const grandTotal = Math.round(subtotal + totalGstAmount + sgst + cgst);
-  const roundOff = parseFloat((grandTotal - (subtotal + totalGstAmount + sgst + cgst)).toFixed(2));
+  const sgst = totalGstAmount / 2;
+  const cgst = totalGstAmount / 2;
+  // Grand Total = Subtotal + Total GST (SGST+CGST are just components of Total GST, not additive)
+  const grandTotal = Math.round(subtotal + totalGstAmount);
+  // Round Off = Difference between rounded Grand Total and precise sum
+  const roundOff = parseFloat((grandTotal - (subtotal + totalGstAmount)).toFixed(2));
   const balanceAmount = grandTotal - paidAmount;
 
   // Convert number to words
@@ -243,37 +252,49 @@ export default function Billing() {
   if (chunks.length === 0) chunks.push([]);
 
   // Invoice Number Logic
-  const generateInvoiceNumber = () => {
-    const today = new Date();
-    const yy = today.getFullYear().toString().slice(-2);
-    const mm = (today.getMonth() + 1).toString().padStart(2, '0');
-    const dd = today.getDate().toString().padStart(2, '0');
-    const prefix = `${yy}${mm}${dd}`;
+  const [invoiceNumber, setInvoiceNumber] = useState('');
 
-    const savedInvoices = JSON.parse(localStorage.getItem('invoices') || '[]');
-    // Find invoices matching today's prefix
-    const todaysInvoices = savedInvoices.filter((inv: any) =>
-      inv.invoiceNumber && inv.invoiceNumber.toString().startsWith(prefix)
-    );
+  const fetchNextInvoiceNumber = async () => {
+    try {
+      const today = new Date();
+      const yy = today.getFullYear().toString().slice(-2);
+      const mm = (today.getMonth() + 1).toString().padStart(2, '0');
+      const dd = today.getDate().toString().padStart(2, '0');
+      const prefix = `${yy}${mm}${dd}`;
 
-    let nextSequence = 1;
-    if (todaysInvoices.length > 0) {
-      // Extract numeric suffix
-      const suffixes = todaysInvoices.map((inv: any) => {
-        const numStr = inv.invoiceNumber.toString();
-        if (numStr.length >= 10) {
-          return parseInt(numStr.slice(6));
-        }
-        return 0;
-      });
-      const maxSuffix = Math.max(...suffixes, 0);
-      nextSequence = maxSuffix + 1;
+      const savedInvoices = await CustomerBillsAPI.getAllInvoices();
+
+      // Find invoices matching today's prefix
+      const todaysInvoices = savedInvoices.filter((inv: any) =>
+        inv.invoiceNumber && inv.invoiceNumber.toString().startsWith(prefix)
+      );
+
+      let nextSequence = 1;
+      if (todaysInvoices.length > 0) {
+        // Extract numeric suffix
+        const suffixes = todaysInvoices.map((inv: any) => {
+          const numStr = inv.invoiceNumber.toString();
+          if (numStr.length >= 10) {
+            return parseInt(numStr.slice(6));
+          }
+          return 0;
+        });
+        const maxSuffix = Math.max(...suffixes, 0);
+        nextSequence = maxSuffix + 1;
+      }
+
+      setInvoiceNumber(`${prefix}${nextSequence.toString().padStart(4, '0')}`);
+    } catch (error) {
+      console.error("Failed to generate invoice number", error);
+      // Fallback to timestamp if API fails
+      setInvoiceNumber(`INV${Date.now()}`);
     }
-
-    return `${prefix}${nextSequence.toString().padStart(4, '0')}`;
   };
 
-  const [invoiceNumber, setInvoiceNumber] = useState(generateInvoiceNumber());
+  useEffect(() => {
+    fetchNextInvoiceNumber();
+  }, []);
+
 
   // Customer Auto-Suggestion Logic
   const [customers, setCustomers] = useState<any[]>([]);
@@ -283,8 +304,16 @@ export default function Billing() {
 
   // Load customers on mount
   useEffect(() => {
-    const savedCustomers = JSON.parse(localStorage.getItem('customers') || '[]');
-    setCustomers(savedCustomers);
+    const loadCustomers = async () => {
+      try {
+        const savedCustomers = await customerService.getAllCustomers().catch(e => []);
+        setCustomers(Array.isArray(savedCustomers) ? savedCustomers : []);
+      } catch (error) {
+        console.error("Failed to load customers", error);
+        setCustomers([]);
+      }
+    };
+    loadCustomers();
   }, []);
 
   // Close dropdown when clicking outside
@@ -314,9 +343,17 @@ export default function Billing() {
     }
   };
 
+  const formatPhoneNumber = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 10);
+    if (digits.length > 5) {
+      return digits.slice(0, 5) + ' ' + digits.slice(5);
+    }
+    return digits;
+  };
+
   const handleSelectCustomer = (customer: any) => {
     setCustomerName(customer.name);
-    setCustomerPhone(customer.phone);
+    setCustomerPhone(formatPhoneNumber(customer.phone));
     setCustomerAddress(customer.address);
     setCustomerGst(customer.gstin || ''); // Auto-fill GSTIN if available
     setShowSuggestions(false);
@@ -324,57 +361,52 @@ export default function Billing() {
 
   // Re-generate invoice number on mount to ensure freshness (in case other tabs added invoices)
   useEffect(() => {
-    setInvoiceNumber(generateInvoiceNumber());
+    fetchNextInvoiceNumber();
   }, []);
   const invoiceDate = new Date().toLocaleDateString('en-IN');
   const invoiceTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
-  const saveInvoiceToStorage = () => {
+  const saveInvoiceToStorage = async () => {
     try {
-      // Store in localStorage (will be replaced with database later)
-      const existingCustomers = JSON.parse(localStorage.getItem('customers') || '[]');
-      const existingInvoices = JSON.parse(localStorage.getItem('invoices') || '[]');
+      // 1. Handle Customer
+      let customerId = '';
 
-      // Check if customer exists by phone
-      let customer = existingCustomers.find((c: any) => c.phone === customerPhone);
+      // Check if customer exists
+      const existingCustomers = await customerService.getAllCustomers();
+      let customer = existingCustomers.find(c => c.phone === customerPhone);
 
       if (customer) {
-        // Update existing customer
-        customer.totalPurchases = (customer.totalPurchases || 0) + grandTotal;
-        customer.totalOrders = (customer.totalOrders || 0) + 1;
-        customer.lastPurchaseDate = invoiceDate;
-        customer.updatedAt = new Date().toISOString().split('T')[0];
-
-        const updatedCustomers = existingCustomers.map((c: any) =>
-          c.phone === customerPhone ? customer : c
-        );
-        localStorage.setItem('customers', JSON.stringify(updatedCustomers));
+        customerId = customer.id;
+        // Update customer details if changed
+        await customerService.updateCustomer(customer.id, {
+          name: customerName,
+          address: customerAddress,
+          gstin: customerGst,
+          updatedAt: new Date().toISOString().split('T')[0]
+        });
       } else {
         // Create new customer
-        const newCustomer = {
-          id: `C${(existingCustomers.length + 1).toString().padStart(3, '0')}`,
+        const newCustomer = await customerService.addCustomer({
           name: customerName,
           phone: customerPhone,
           address: customerAddress,
+          gstin: customerGst,
           email: '',
           customerType: 'Retail',
-          status: 'Active',
-          totalPurchases: grandTotal,
-          totalOrders: 1,
-          lastPurchaseDate: invoiceDate,
-          createdAt: new Date().toISOString().split('T')[0],
-          updatedAt: new Date().toISOString().split('T')[0]
-        };
-        customer = newCustomer;
-        existingCustomers.push(newCustomer);
-        localStorage.setItem('customers', JSON.stringify(existingCustomers));
+          status: 'Active'
+        });
+        if (newCustomer) {
+          customerId = newCustomer.id;
+        } else {
+          throw new Error("Failed to create customer");
+        }
       }
 
-      // Save invoice
-      const invoice = {
-        id: `I${(existingInvoices.length + 1).toString().padStart(3, '0')}`,
+      // 2. Save Invoice
+      const invoiceData = {
+        id: `I${Date.now()}`, // Temporary ID, backend might generate one or use this
         invoiceNumber,
-        customerId: customer.id,
+        customerId,
         date: invoiceDate,
         time: invoiceTime,
         amount: grandTotal,
@@ -385,49 +417,24 @@ export default function Billing() {
         customerName,
         customerPhone,
         customerAddress,
-        dueDate: dueDate || '-' // Capture Due Date
+        dueDate: dueDate || '-',
+        createdAt: new Date().toISOString()
       };
-      existingInvoices.push(invoice);
-      localStorage.setItem('invoices', JSON.stringify(existingInvoices));
 
-      // Update Stock
-      products.forEach(p => {
-        const inventoryProduct = availableProducts.find(ap => ap.name === p.name);
-        if (inventoryProduct) {
-          const oldStock = inventoryProduct.stock;
-          const newStock = oldStock - p.quantity;
+      await BillingAPI.createInvoice(invoiceData);
 
-          // 1. Update Product Service
-          productService.updateProduct(inventoryProduct.id, {
-            stock: newStock,
-            updatedAt: invoiceDate
-          });
+      // 3. Stock Update: Handled automatically by Backend (Automatic Deduction)
+      // Frontend refresh is enough
 
-          // 2. Add Stock Log
-          const stockLog: StockLog = {
-            id: `L${Date.now()}_${inventoryProduct.id}`,
-            productId: inventoryProduct.id,
-            productName: inventoryProduct.name,
-            oldStock: oldStock,
-            newStock: newStock,
-            changeType: 'OUT',
-            quantity: p.quantity,
-            reason: 'Billing',
-            remarks: `Sale via Invoice #${invoiceNumber}`,
-            updatedBy: 'System',
-            dateTime: new Date().toLocaleString('en-IN')
-          };
-          stockService.addLog(stockLog);
-        }
-      });
 
       // Refresh available products
-      setAvailableProducts(productService.getAllProducts());
+      const refreshedProducts = await productService.getAllProducts();
+      setAvailableProducts(refreshedProducts);
 
       return true; // Success
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving bill:", error);
-      triggerError("SAVE FAILED! DATA DISK ERROR.");
+      triggerError(`SAVE FAILED! ${error.message || "SERVER ERROR"}`);
       return false; // Failure
     }
   };
@@ -472,7 +479,7 @@ export default function Billing() {
     setPaidAmount(0);
     setIsSaving(false);
     setDueDate('');
-    setInvoiceNumber(generateInvoiceNumber());
+    fetchNextInvoiceNumber();
   };
 
   const handleSaveBill = async () => {
@@ -484,7 +491,7 @@ export default function Billing() {
     setIsSaving(true);
 
     // 1. Save Data
-    const saved = saveInvoiceToStorage();
+    const saved = await saveInvoiceToStorage();
     if (!saved) {
       setIsSaving(false);
       return;
@@ -514,7 +521,7 @@ export default function Billing() {
     }
   };
 
-  const handlePrintBill = () => {
+  const handlePrintBill = async () => {
     if (products.length === 0) {
       triggerError('NO PRODUCTS! ADD ITEMS TO PRINT.');
       return;
@@ -526,7 +533,7 @@ export default function Billing() {
     }
 
     // 1. Save Data (Auto-save on Print)
-    const saved = saveInvoiceToStorage();
+    const saved = await saveInvoiceToStorage();
     if (!saved) return;
 
     // 2. Print
@@ -581,8 +588,8 @@ export default function Billing() {
             <div
               key={pageIndex}
               id={pageIndex === 0 ? "invoice" : `invoice-${pageIndex}`}
-              className="w-[210mm] min-h-[297mm] bg-white shadow-2xl mx-auto border-2 border-black flex flex-col relative print:shadow-none print:border-none print:m-0 print:w-full print:h-full text-black box-border overflow-visible"
-              style={{ width: '210mm', minHeight: 'auto', padding: '10mm', boxSizing: 'border-box', overflow: 'visible', display: 'block' }}
+              className="invoice-page w-[210mm] min-h-[297mm] bg-white shadow-2xl mx-auto border-2 border-black flex flex-col relative print:shadow-none text-black box-border overflow-visible"
+              style={{ width: '210mm', height: '297mm', padding: '10mm', boxSizing: 'border-box', overflow: 'visible', display: 'flex' }}
             >
               <div className="flex flex-col flex-1">
                 {/* HEADER SECTION - BORDER BOTTOM */}
@@ -596,8 +603,8 @@ export default function Billing() {
 
                   {/* TITLE BOX */}
                   <div className="flex-1 flex flex-col items-center justify-center">
-                    <h1 className="text-4xl font-bold text-[#22c55e] tracking-wider font-serif">VK Info TECH</h1>
-                    <p className="text-xs font-bold mt-1">Complete Technology Solution Provider</p>
+                    <h1 className="text-4xl font-bold text-[#22c55e] tracking-wider company-name-font">VK INFOTECH</h1>
+                    <p className="text-xs font-bold mt-1" style={{ fontFamily: 'ZyanaRegular, serif' }}>Complete Technology Solution Provider</p>
                   </div>
 
                   {/* INVOICE LABEL BOX */}
@@ -648,11 +655,12 @@ export default function Billing() {
                         onChange={(e) => setBillFromMobile(e.target.value)}
                       />
                     </div>
-                    <div className="flex items-center gap-1">
+                    {/* Conditional GST Display - Hidden in print if empty */}
+                    <div className={`flex items-center gap-1 ${billFromGst ? '' : 'print:hidden'}`}>
                       <span>GST:</span>
                       <input
                         type="text"
-                        className="outline-none bg-transparent w-full uppercase"
+                        className="outline-none bg-transparent w-full uppercase placeholder-gray-400"
                         value={billFromGst}
                         onChange={(e) => setBillFromGst(e.target.value.toUpperCase())}
                         placeholder="GSTIN (Manual)"
@@ -702,15 +710,20 @@ export default function Billing() {
                         className="outline-none border-b border-gray-400 bg-transparent resize-none h-[60px] w-full placeholder-gray-500"
                         placeholder="Address Details..."
                       />
-                      <input
-                        id={`customer-phone-${pageIndex}`}
-                        type="text"
-                        autoComplete="off"
-                        value={customerPhone}
-                        onChange={(e) => setCustomerPhone(e.target.value)}
-                        className="outline-none border-b border-gray-400 bg-transparent w-full placeholder-gray-500"
-                        placeholder="Phone No"
-                      />
+
+                      {/* Mobile Number with Fixed Prefix */}
+                      <div className="flex items-center border-b border-gray-400 pb-1">
+                        <span className="text-black whitespace-pre font-bold mr-1 select-none text-[11px]">ph no ; +91</span>
+                        <input
+                          id={`customer-phone-${pageIndex}`}
+                          type="text"
+                          autoComplete="off"
+                          value={customerPhone}
+                          onChange={(e) => setCustomerPhone(formatPhoneNumber(e.target.value))}
+                          className="outline-none bg-transparent w-full placeholder-gray-500 font-bold text-[11px]"
+                          placeholder="XXXXX XXXXX"
+                        />
+                      </div>
                       <input
                         id={`customer-gst-${pageIndex}`}
                         type="text"
@@ -888,7 +901,12 @@ export default function Billing() {
                     {/* QR Code & UPI */}
                     <div className="border-b border-black p-2 flex items-center gap-4">
                       <div className="w-16 h-16 border border-black p-1 flex-shrink-0 bg-white">
-                        <img src="/payment-qr.png" alt="QR" className="w-full h-full object-contain" />
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`upi://pay?pa=${companyDetails.upiId}&pn=${encodeURIComponent(companyDetails.name)}&am=${grandTotal}&cu=INR`)}`}
+                          alt="Scan to Pay"
+                          className="w-full h-full object-contain"
+                          crossOrigin="anonymous"
+                        />
                       </div>
                       <div className="flex flex-col">
                         <h4 className="font-bold text-[10px] uppercase text-blue-800 mb-0.5">Scan to Pay</h4>
@@ -923,36 +941,35 @@ export default function Billing() {
                           </tr>
                           <tr className={`h-6 border-b border-gray-100 summary-gst-row ${isLastPage ? '' : 'hidden'}`}>
                             <td className="px-2 flex items-center gap-1">
-                              GST (<input
-                                type="number"
+                              GST
+                              <select
                                 value={gstRate}
-                                onChange={(e) => setGstRate(Number(e.target.value))}
-                                className="w-8 border-b border-gray-400 text-center outline-none bg-transparent font-bold"
-                              />%)
+                                onChange={(e) => {
+                                  const newRate = Number(e.target.value);
+                                  setGstRate(newRate);
+                                  setSgstRate(newRate / 2);
+                                  setCgstRate(newRate / 2);
+                                }}
+                                className="w-12 border-b border-gray-400 text-center outline-none bg-transparent font-bold cursor-pointer"
+                              >
+                                <option value="0">0%</option>
+                                <option value="12">12%</option>
+                                <option value="18">18%</option>
+                              </select>
                             </td>
                             <td className="px-2 text-right invoice-gst">₹{totalGstAmount.toFixed(2)}</td>
                           </tr>
-                          <tr className={`h-6 border-b border-gray-100 summary-sgst-row ${isLastPage ? '' : 'hidden'}`}>
-                            <td className="px-2 flex items-center gap-1">
-                              SGST (<input
-                                type="number"
-                                value={sgstRate}
-                                onChange={(e) => setSgstRate(Number(e.target.value))}
-                                className="w-6 border-b border-gray-400 text-center outline-none bg-transparent font-bold"
-                              />%)
+                          <tr className={`h-6 border-b border-gray-100 summary-sgst-row ${(isLastPage && gstRate > 0) ? '' : 'hidden'}`}>
+                            <td className="px-2 flex items-center gap-1 text-gray-500">
+                              SGST ({sgstRate}%)
                             </td>
-                            <td className="px-2 text-right invoice-sgst">₹{sgst.toFixed(2)}</td>
+                            <td className="px-2 text-right invoice-sgst text-gray-500">₹{sgst.toFixed(2)}</td>
                           </tr>
-                          <tr className={`h-6 border-b border-gray-100 summary-cgst-row ${isLastPage ? '' : 'hidden'}`}>
-                            <td className="px-2 flex items-center gap-1">
-                              CGST (<input
-                                type="number"
-                                value={cgstRate}
-                                onChange={(e) => setCgstRate(Number(e.target.value))}
-                                className="w-6 border-b border-gray-400 text-center outline-none bg-transparent font-bold"
-                              />%)
+                          <tr className={`h-6 border-b border-gray-100 summary-cgst-row ${(isLastPage && gstRate > 0) ? '' : 'hidden'}`}>
+                            <td className="px-2 flex items-center gap-1 text-gray-500">
+                              CGST ({cgstRate}%)
                             </td>
-                            <td className="px-2 text-right invoice-cgst">₹{cgst.toFixed(2)}</td>
+                            <td className="px-2 text-right invoice-cgst text-gray-500">₹{cgst.toFixed(2)}</td>
                           </tr>
                           <tr className={`h-6 border-b border-gray-100 summary-roundoff-row ${isLastPage ? '' : 'hidden'}`}>
                             <td className="px-2">Round Off</td>
@@ -990,7 +1007,12 @@ export default function Billing() {
                     <div className="flex-1 relative flex flex-col items-center justify-end p-2 px-4 signature-block min-h-[80px]">
                       <div className="absolute top-2 right-2 text-[9px] font-bold text-gray-400">For <span className="invoice-company-name text-black">{companyDetails.name}</span></div>
                       <div className="flex items-center justify-center mb-1 flex-1">
-                        <img src={companyDetails.signature || "/authorized-signature.png"} alt="Authorized Signature" className="max-h-16 w-auto object-contain invoice-signature-img" />
+                        <img
+                          src="/authorized-signature.png"
+                          alt="Authorized Signature"
+                          className="max-h-20 w-auto object-contain invoice-signature-img"
+                          crossOrigin="anonymous"
+                        />
                       </div>
                       <div className="text-[10px] font-bold border-t border-black w-full text-center pt-1 mt-1">Authorized Signature</div>
                     </div>

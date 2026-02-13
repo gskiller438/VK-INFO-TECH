@@ -50,6 +50,7 @@
     "check": "tsc && vite build && wrangler deploy --dry-run",
     "dev": "vite",
     "knip": "knip",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "server": "cd server && node index.js"
   }
 }

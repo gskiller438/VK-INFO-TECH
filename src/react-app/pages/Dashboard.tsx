@@ -22,6 +22,8 @@ import {
   Legend,
   ResponsiveContainer
 } from 'recharts';
+import { CustomerBillsAPI } from '../services/CustomerBillsAPI';
+import { productService } from '../services/ProductService';
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
@@ -49,177 +51,216 @@ export default function Dashboard() {
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
   useEffect(() => {
-    const savedInvoices = JSON.parse(localStorage.getItem('invoices') || '[]');
-    const savedProducts = JSON.parse(localStorage.getItem('products') || '[]');
+    const loadDashboardData = async () => {
+      try {
+        // Fetch data from API
+        const [invoicesData, productsData] = await Promise.all([
+          CustomerBillsAPI.getAllInvoices().catch(err => { console.warn("Invoices fetch failed", err); return []; }),
+          productService.getAllProducts().catch(err => { console.warn("Products fetch failed", err); return []; })
+        ]);
 
-    const now = new Date();
-    const todayStr = now.toLocaleDateString('en-IN');
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
+        const savedInvoices = Array.isArray(invoicesData) ? invoicesData : [];
+        const savedProducts = Array.isArray(productsData) ? productsData : [];
 
-    // 1. Calculate Stats
-    let todaySales = 0;
-    let monthlySales = 0;
-    let prevMonthlySales = 0;
+        const now = new Date();
+        const todayStr = now.toLocaleDateString('en-IN');
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
 
-    savedInvoices.forEach((inv: any) => {
-      const invDate = inv.date; // Format "DD/MM/YYYY"
-      const [d, m, y] = invDate.split('/');
-      const dateObj = new Date(Number(y), Number(m) - 1, Number(d));
+        // 1. Calculate Stats
+        let todaySales = 0;
+        let monthlySales = 0;
+        let prevMonthlySales = 0;
 
-      if (invDate === todayStr) {
-        todaySales += inv.amount;
-      }
+        savedInvoices.forEach((inv: any) => {
+          if (!inv || !inv.date) return;
+          const invDate = inv.date; // Format "DD/MM/YYYY" or ISO
+          // Handle potential ISO date or DD/MM/YYYY
+          try {
+            let dateObj: Date;
+            if (invDate.includes('/')) {
+              const [d, m, y] = invDate.split('/');
+              dateObj = new Date(Number(y), Number(m) - 1, Number(d));
+            } else {
+              dateObj = new Date(invDate);
+            }
+            if (isNaN(dateObj.getTime())) return;
 
-      if (dateObj.getMonth() === currentMonth && dateObj.getFullYear() === currentYear) {
-        monthlySales += inv.amount;
-      } else if (dateObj.getMonth() === currentMonth - 1 && dateObj.getFullYear() === currentYear) {
-        prevMonthlySales += inv.amount;
-      }
-    });
 
-    const monthlyChange = prevMonthlySales > 0
-      ? `+${(((monthlySales - prevMonthlySales) / prevMonthlySales) * 100).toFixed(0)}%`
-      : '+100%';
+            // formatted check for today
+            const invDateStr = dateObj.toLocaleDateString('en-IN');
 
-    setStats({
-      todaySales,
-      monthlySales,
-      totalOrders: savedInvoices.length,
-      totalProducts: savedProducts.length,
-      todayChange: '+12%', // Static trend for visual polish
-      monthlyChange,
-      ordersChange: '+5%',
-      productsChange: '+2%'
-    });
+            if (invDateStr === todayStr) {
+              todaySales += inv.amount;
+            }
 
-    // 2. Daily Sales Analysis (Last 7 Days)
-    const last7Days = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toLocaleDateString('en-IN');
-      const sales = savedInvoices
-        .filter((inv: any) => inv.date === dateStr)
-        .reduce((sum: number, inv: any) => sum + inv.amount, 0);
+            if (dateObj.getMonth() === currentMonth && dateObj.getFullYear() === currentYear) {
+              monthlySales += inv.amount;
+            } else if (dateObj.getMonth() === currentMonth - 1 && dateObj.getFullYear() === currentYear) {
+              prevMonthlySales += inv.amount;
+            }
+          } catch (e) {
+            console.warn("Error parsing invoice date", inv);
+          }
+        });
 
-      last7Days.push({
-        date: d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
-        sales
-      });
-    }
+        const monthlyChange = prevMonthlySales > 0
+          ? `+${(((monthlySales - prevMonthlySales) / prevMonthlySales) * 100).toFixed(0)}%`
+          : '+100%';
 
-    // 3. Monthly Sales Trend (Last 6 Months)
-    const monthlyTrend = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const m = d.getMonth();
-      const y = d.getFullYear();
-      const sales = savedInvoices.filter((inv: any) => {
-        const [, im, iy] = inv.date.split('/');
-        return Number(im) - 1 === m && Number(iy) === y;
-      }).reduce((sum: number, inv: any) => sum + inv.amount, 0);
+        setStats({
+          todaySales,
+          monthlySales,
+          totalOrders: savedInvoices.length,
+          totalProducts: savedProducts.length,
+          todayChange: '+12%', // Static trend for visual polish
+          monthlyChange,
+          ordersChange: '+5%',
+          productsChange: '+2%'
+        });
 
-      monthlyTrend.push({
-        month: d.toLocaleDateString('default', { month: 'short' }),
-        sales
-      });
-    }
+        // 2. Daily Sales Analysis (Last 7 Days)
+        const last7Days = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          const dateStr = d.toLocaleDateString('en-IN');
 
-    // 4. Product Sales Distribution
-    const salesByBrand: Record<string, number> = {};
-    savedInvoices.forEach((inv: any) => {
-      inv.products?.forEach((p: any) => {
-        const brand = p.brand || 'General';
-        salesByBrand[brand] = (salesByBrand[brand] || 0) + p.amount;
-      });
-    });
+          const sales = savedInvoices
+            .filter((inv: any) => {
+              const dObj = inv.date.includes('/') ?
+                new Date(Number(inv.date.split('/')[2]), Number(inv.date.split('/')[1]) - 1, Number(inv.date.split('/')[0]))
+                : new Date(inv.date);
+              return dObj.toLocaleDateString('en-IN') === dateStr;
+            })
+            .reduce((sum: number, inv: any) => sum + inv.amount, 0);
 
-    const productSales = Object.entries(salesByBrand)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
+          last7Days.push({
+            date: d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+            sales
+          });
+        }
 
-    // 5. Top Selling Products
-    const productSoldQty: Record<string, { name: string, brand: string, sold: number, stock: number, minStock: number }> = {};
-    savedInvoices.forEach((inv: any) => {
-      inv.products?.forEach((p: any) => {
-        if (!productSoldQty[p.name]) {
-          const invProd = savedProducts.find((sp: any) => sp.name === p.name);
-          productSoldQty[p.name] = {
+        // 3. Monthly Sales Trend (Last 6 Months)
+        const monthlyTrend = [];
+        for (let i = 5; i >= 0; i--) {
+          const d = new Date();
+          d.setMonth(d.getMonth() - i);
+          const m = d.getMonth();
+          const y = d.getFullYear();
+          const sales = savedInvoices.filter((inv: any) => {
+            const dObj = inv.date.includes('/') ?
+              new Date(Number(inv.date.split('/')[2]), Number(inv.date.split('/')[1]) - 1, Number(inv.date.split('/')[0]))
+              : new Date(inv.date);
+            return dObj.getMonth() === m && dObj.getFullYear() === y;
+          }).reduce((sum: number, inv: any) => sum + inv.amount, 0);
+
+          monthlyTrend.push({
+            month: d.toLocaleDateString('default', { month: 'short' }),
+            sales
+          });
+        }
+
+        // 4. Product Sales Distribution
+        const salesByBrand: Record<string, number> = {};
+        savedInvoices.forEach((inv: any) => {
+          inv.products?.forEach((p: any) => {
+            const brand = p.brand || 'General';
+            salesByBrand[brand] = (salesByBrand[brand] || 0) + (p.amount || 0);
+          });
+        });
+
+        const productSales = Object.entries(salesByBrand)
+          .map(([name, value]) => ({ name, value }))
+          .sort((a, b) => b.value - a.value)
+          .slice(0, 5);
+
+        // 5. Top Selling Products
+        const productSoldQty: Record<string, { name: string, brand: string, sold: number, stock: number, minStock: number }> = {};
+        savedInvoices.forEach((inv: any) => {
+          inv.products?.forEach((p: any) => {
+            if (!productSoldQty[p.name]) {
+              const invProd = savedProducts.find((sp: any) => sp.name === p.name);
+              productSoldQty[p.name] = {
+                name: p.name,
+                brand: p.brand || '',
+                sold: 0,
+                stock: invProd?.stock || 0,
+                minStock: invProd?.minStock || 0
+              };
+            }
+            productSoldQty[p.name].sold += (p.quantity || 0);
+          });
+        });
+
+        const topSelling = Object.values(productSoldQty)
+          .sort((a, b) => b.sold - a.sold)
+          .slice(0, 5)
+          .map(p => ({
+            ...p,
+            status: p.stock === 0 ? 'Out of Stock' : p.stock <= p.minStock ? 'Low Stock' : 'Available'
+          }));
+
+        // 6. Low Stock Alerts
+        const lowStock = savedProducts
+          .filter((p: any) => p.stock <= p.minStock)
+          .sort((a: any, b: any) => a.stock - b.stock)
+          .slice(0, 5)
+          .map((p: any) => ({
             name: p.name,
             brand: p.brand,
-            sold: 0,
-            stock: invProd?.stock || 0,
-            minStock: invProd?.minStock || 0
-          };
-        }
-        productSoldQty[p.name].sold += p.quantity;
-      });
-    });
+            stock: p.stock,
+            status: p.stock === 0 ? 'Out of Stock' : 'Low Stock'
+          }));
 
-    const topSelling = Object.values(productSoldQty)
-      .sort((a, b) => b.sold - a.sold)
-      .slice(0, 5)
-      .map(p => ({
-        ...p,
-        status: p.stock === 0 ? 'Out of Stock' : p.stock <= p.minStock ? 'Low Stock' : 'Available'
-      }));
+        setChartsData({
+          dailySales: last7Days,
+          monthlySales: monthlyTrend,
+          productSales,
+          topProducts: topSelling,
+          recentInvoices: [...savedInvoices].reverse().slice(0, 5).map((inv: any) => ({
+            id: inv.invoiceNumber,
+            customer: inv.customerName,
+            amount: inv.amount,
+            status: inv.balance <= 0 ? 'Paid' : 'Partial'
+          })),
+          lowStock
+        });
 
-    // 6. Low Stock Alerts
-    const lowStock = savedProducts
-      .filter((p: any) => p.stock <= p.minStock)
-      .sort((a: any, b: any) => a.stock - b.stock)
-      .slice(0, 5)
-      .map((p: any) => ({
-        name: p.name,
-        brand: p.brand,
-        stock: p.stock,
-        status: p.stock === 0 ? 'Out of Stock' : 'Low Stock'
-      }));
+        // 7. Payment Due Alerts
+        const parseDate = (dateStr: string) => {
+          if (!dateStr || dateStr === '-') return null;
+          if (dateStr.includes('/')) {
+            const [day, month, year] = dateStr.split('/');
+            return new Date(Number(year), Number(month) - 1, Number(day));
+          }
+          return new Date(dateStr);
+        };
 
-    setChartsData({
-      dailySales: last7Days,
-      monthlySales: monthlyTrend,
-      productSales,
-      topProducts: topSelling,
-      recentInvoices: [...savedInvoices].reverse().slice(0, 5).map((inv: any) => ({
-        id: inv.invoiceNumber,
-        customer: inv.customerName,
-        amount: inv.amount,
-        status: inv.balance <= 0 ? 'Paid' : 'Partial'
-      })),
-      lowStock
-    });
+        const tomorrow = new Date(now);
+        tomorrow.setDate(now.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
 
-    // 7. Payment Due Alerts
-    const parseDate = (dateStr: string) => {
-      if (!dateStr || dateStr === '-') return null;
-      if (dateStr.includes('/')) {
-        const [day, month, year] = dateStr.split('/');
-        return new Date(Number(year), Number(month) - 1, Number(day));
+        const due = savedInvoices.filter((inv: any) => {
+          if (!inv.balance || inv.balance <= 0 || !inv.dueDate) return false;
+          const dueDate = parseDate(inv.dueDate);
+          if (!dueDate) return false;
+          dueDate.setHours(0, 0, 0, 0);
+          return dueDate <= tomorrow;
+        }).sort((a: any, b: any) => {
+          const dateA = parseDate(a.dueDate) || new Date();
+          const dateB = parseDate(b.dueDate) || new Date();
+          return dateA.getTime() - dateB.getTime();
+        });
+
+        setDueInvoices(due);
+
+      } catch (error) {
+        console.error("Failed to load dashboard data", error);
       }
-      return new Date(dateStr);
     };
 
-    const tomorrow = new Date(now);
-    tomorrow.setDate(now.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0);
-
-    const due = savedInvoices.filter((inv: any) => {
-      if (!inv.balance || inv.balance <= 0 || !inv.dueDate) return false;
-      const dueDate = parseDate(inv.dueDate);
-      if (!dueDate) return false;
-      dueDate.setHours(0, 0, 0, 0);
-      return dueDate <= tomorrow;
-    }).sort((a: any, b: any) => {
-      const dateA = parseDate(a.dueDate) || new Date();
-      const dateB = parseDate(b.dueDate) || new Date();
-      return dateA.getTime() - dateB.getTime();
-    });
-
-    setDueInvoices(due);
+    loadDashboardData();
   }, []);
 
   const statCards = [

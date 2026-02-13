@@ -1,0 +1,23 @@
+{
+    "dbcode.connections": [
+        {
+            "connectionId": "t4PKFb_aO647j__HqJbdr",
+            "name": "VK INFOTECH",
+            "driver": "mongodb",
+            "color": "#BD0014",
+            "connectionType": "host",
+            "driverOptions": {
+                "protocol": "mongodb+srv://"
+            },
+            "host": "localhost",
+            "port": 27017,
+            "ssl": false,
+            "authMethod": "password",
+            "username": "sanjay",
+            "password": "",
+            "savePassword": "secretStorage",
+            "readOnly": false,
+            "connectionTimeout": 30
+        }
+    ]
+}

@@ -21,27 +21,13 @@ import {
   BarChart3,
   Clock,
   Download,
-  Layers
+  Layers,
+  Eye
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { CompanyDetails, InvoiceData } from '../types';
 import { downloadSingleInvoicePDF, downloadBatchInvoicesAsZip } from '../services/BackgroundPDFGenerator';
 
-interface Customer {
-  id: string;
-  name: string;
-  phone: string;
-  address: string;
-  email: string;
-  gstin?: string;
-  customerType: 'Retail' | 'Wholesale';
-  status: 'Active' | 'Inactive';
-  totalPurchases: number;
-  totalOrders: number;
-  lastPurchaseDate: string;
-  createdAt: string;
-  updatedAt: string;
-}
 
 interface Invoice {
   id: string;
@@ -106,53 +92,74 @@ const mapInvoiceToPrintData = (invoice: Invoice, customer: Customer, _companyDet
   };
 };
 
+import { customerService, type Customer } from '../services/CustomerService';
+import { CustomerBillsAPI } from '../services/CustomerBillsAPI';
+import { authService } from '../services/AuthService';
+
 export default function Customers() {
   const navigate = useNavigate();
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customerInvoices, setCustomerInvoices] = useState<Invoice[]>([]); // Keep this for "Latest Invoice" calculation
+  const [loading, setLoading] = useState(true);
 
+  // Load Customers and Invoices
   useEffect(() => {
-    const savedCustomers = localStorage.getItem('customers');
-    if (savedCustomers) {
-      setCustomers(JSON.parse(savedCustomers));
-    } else {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [fetchedCustomers, fetchedInvoices] = await Promise.all([
+        customerService.getAllCustomers().catch(err => { console.warn("Customers fetch failed", err); return []; }),
+        CustomerBillsAPI.getAllInvoices().catch(err => { console.warn("Invoices fetch failed", err); return []; })
+      ]);
+      setCustomers(Array.isArray(fetchedCustomers) ? fetchedCustomers : []);
+      setCustomerInvoices(Array.isArray(fetchedInvoices) ? fetchedInvoices as unknown as Invoice[] : []);
+    } catch (error) {
+      console.error("Failed to load data", error);
       setCustomers([]);
+      setCustomerInvoices([]);
+    } finally {
+      setLoading(false);
     }
-  }, []);
-
-  // Load invoices from localStorage
-  useEffect(() => {
-    const savedInvoices = localStorage.getItem('invoices');
-    if (savedInvoices) {
-      setCustomerInvoices(JSON.parse(savedInvoices));
-    }
-  }, []);
-
-  const [customerInvoices, setCustomerInvoices] = useState<Invoice[]>([]);
+  };
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [isUpdateSuccess, setIsUpdateSuccess] = useState(false);
+  const [isAddSuccess, setIsAddSuccess] = useState(false);
+  const [addError, setAddError] = useState('');
   const [showExportModal, setShowExportModal] = useState(false);
 
-  // Debugging
-  useEffect(() => {
-    console.log("Customers Component Rendered. Total Customers:", customers.length);
-  }, [customers]);
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [isBatchDownloading, setIsBatchDownloading] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [customerForm, setCustomerForm] = useState({
+    name: '',
+    phone: '',
+    address: '',
+    email: '',
+    gstin: '',
+    customerType: 'Retail' as 'Retail' | 'Wholesale',
+    status: 'Active' as 'Active' | 'Inactive'
+  });
+  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  // Company Details (Hardcoded for now as in Billing)
+  // Company details
   const companyDetails: CompanyDetails = {
-    name: 'VK INFO TECH',
+    name: 'VK INFOTECH',
     tagline: 'Complete Technology Solution Provider',
-    address: '123 Tech Street, Digital City', // Update with real address
+    address: '123 Tech Street, Digital City',
     mobile: '+91 9876543210',
     email: 'vkinfotech.vk@gmail.com',
     gstin: '33AAAAA0000A1Z5',
@@ -160,21 +167,20 @@ export default function Customers() {
     accountNumber: '1234567890',
     ifsc: 'HDFC0001234',
     upiId: 'vkinfotech@upi',
-    logo: '/invoice-logo.png'
+    logo: '/invoice-logo.png',
+    qrCode: '/payment-qr.png',
+    bankHolder: 'Vasanthakumar Palanivel'
   };
 
   const handleDownloadPDF = async (invoice: Invoice, customer: Customer) => {
     setDownloadingInvoiceId(invoice.id);
     setDownloadError(null);
-
     try {
-      // Use background PDF generator - no DOM rendering required
       const printData = mapInvoiceToPrintData(invoice, customer, companyDetails);
       await downloadSingleInvoicePDF(companyDetails, printData);
-    } catch (err) {
-      console.error("Download failed", err);
+    } catch (error) {
+      console.error("PDF Download failed", error);
       setDownloadError("Failed to download PDF. Please try again.");
-      setTimeout(() => setDownloadError(null), 3000);
     } finally {
       setDownloadingInvoiceId(null);
     }
@@ -182,198 +188,178 @@ export default function Customers() {
 
   const handleDownloadAllPDF = async (customer: Customer, invoices: Invoice[]) => {
     if (invoices.length === 0) return;
-
     setIsBatchDownloading(true);
-    setBatchProgress({ current: 0, total: invoices.length });
     setDownloadError(null);
+    setBatchProgress({ current: 0, total: invoices.length });
 
     try {
-      // Sort invoices by date (newest first)
-      // Prepare all invoice data (sorted by date, newest first)
-      const allPrintData = [...invoices]
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .map(inv =>
-          mapInvoiceToPrintData(inv, customer, companyDetails)
-        );
-
-      // Use background PDF generator - downloads as ZIP file
-      // This runs completely in the background without rendering any UI
-      await downloadBatchInvoicesAsZip(
-        companyDetails,
-        allPrintData,
-        customer.name,
-        {
-          onProgress: (current, total) => {
-            setBatchProgress({ current, total });
-          }
-        }
-      );
-
-    } catch (err) {
-      console.error("Batch download failed", err);
+      const allPrintData = invoices.map(inv => mapInvoiceToPrintData(inv, customer, companyDetails));
+      await downloadBatchInvoicesAsZip(companyDetails, allPrintData, customer.name, {
+        onProgress: (current, total) => setBatchProgress({ current, total })
+      });
+    } catch (error) {
+      console.error("Batch PDF Download failed", error);
       setDownloadError("Failed to download all bills. Please try again.");
-      setTimeout(() => setDownloadError(null), 5000);
     } finally {
       setIsBatchDownloading(false);
       setBatchProgress({ current: 0, total: 0 });
     }
   };
 
-  // Removed: renderedInvoiceData state - no longer needed with background PDF generation
-  // Removed: old sequential effect logic - background generation doesn't require DOM rendering
-
-  const [customerForm, setCustomerForm] = useState({
-    name: '',
-    phone: '+91 ',
-    address: '',
-    email: '',
-    gstin: '',
-    customerType: 'Retail' as 'Retail' | 'Wholesale',
-    status: 'Active' as 'Active' | 'Inactive'
-  });
-
-  // Calculate statistics
-  const totalCustomers = customers.length;
-  const activeCustomers = customers.filter(c => c.status === 'Active').length;
-  const thisMonth = new Date().toISOString().slice(0, 7);
-  const newCustomersMonth = customers.filter(c => c.createdAt.startsWith(thisMonth)).length;
-
-  // Top customers by purchase value
-  const topCustomers = [...customers]
-    .sort((a, b) => b.totalPurchases - a.totalPurchases)
-    .slice(0, 5);
-
-  const filteredCustomers = customers.filter(customer => {
-    const matchesSearch = customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.phone.includes(searchTerm) ||
-      customer.id.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesType = !filterType || customer.customerType === filterType;
-    const matchesStatus = !filterStatus || customer.status === filterStatus;
-
-    return matchesSearch && matchesType && matchesStatus;
-  });
-
-  const handleAddCustomer = () => {
+  // Re-implement handlers using Service
+  const handleAddCustomer = async () => {
     if (!customerForm.name || !customerForm.phone) {
-      alert('Please fill required fields (Name and Phone)');
+      setAddError('Please fill required fields (Name and Phone)');
       return;
     }
 
-    // Check for duplicate phone
-    if (customers.some(c => c.phone === customerForm.phone)) {
-      alert('A customer with this phone number already exists');
+    // Check for duplicate phone (client-side check for immediate feedback, server also handles unique)
+    if (customers.some(c => c.phone === '+91 ' + customerForm.phone)) {
+      setAddError('A customer with this phone number already exists');
       return;
     }
 
-    const newCustomer: Customer = {
-      id: `C${(customers.length + 1).toString().padStart(3, '0')}`,
+    setAddError('');
+
+    // Create new customer via API
+    const newCustomer = await customerService.addCustomer({
       name: customerForm.name,
-      phone: customerForm.phone,
+      phone: '+91 ' + customerForm.phone,
       address: customerForm.address,
       email: customerForm.email,
       gstin: customerForm.gstin,
       customerType: customerForm.customerType,
-      status: customerForm.status,
-      totalPurchases: 0,
-      totalOrders: 0,
-      lastPurchaseDate: '',
-      createdAt: new Date().toISOString().split('T')[0],
-      updatedAt: new Date().toISOString().split('T')[0]
-    };
-
-    const updatedCustomers = [...customers, newCustomer];
-    setCustomers(updatedCustomers);
-    localStorage.setItem('customers', JSON.stringify(updatedCustomers));
-
-    setShowAddModal(false);
-    setCustomerForm({
-      name: '',
-      phone: '+91 ',
-      address: '',
-      email: '',
-      gstin: '',
-      customerType: 'Retail',
-      status: 'Active'
+      status: customerForm.status
     });
-    alert('Customer added successfully');
+
+    if (newCustomer) {
+      setCustomers([...customers, newCustomer]);
+      setCustomerForm({
+        name: '',
+        phone: '',
+        address: '',
+        email: '',
+        gstin: '',
+        customerType: 'Retail',
+        status: 'Active'
+      });
+      setIsAddSuccess(true);
+      setTimeout(() => {
+        setIsAddSuccess(false);
+        setShowAddModal(false);
+      }, 1500);
+    } else {
+      setAddError('Failed to create customer. Please try again.');
+    }
   };
 
-  const handleEditCustomer = () => {
+  const handleEditCustomer = async () => {
     if (!selectedCustomer || !customerForm.name || !customerForm.phone) {
       alert('Please fill required fields');
       return;
     }
 
-    // Check for duplicate phone (excluding current customer)
-    if (customers.some(c => c.id !== selectedCustomer.id && c.phone === customerForm.phone)) {
-      alert('Another customer with this phone number already exists');
-      return;
+    // Update via API
+    const updated = await customerService.updateCustomer(selectedCustomer.id, {
+      name: customerForm.name,
+      phone: '+91 ' + customerForm.phone,
+      address: customerForm.address,
+      email: customerForm.email,
+      gstin: customerForm.gstin,
+      customerType: customerForm.customerType,
+      status: customerForm.status
+    });
+
+    if (updated) {
+      setCustomers(customers.map(c => c.id === selectedCustomer.id ? updated : c));
+      setIsUpdateSuccess(true);
+      setTimeout(() => {
+        setIsUpdateSuccess(false);
+        setShowEditModal(false);
+        setSelectedCustomer(null);
+      }, 1500);
+    } else {
+      alert('Failed to update customer');
     }
-
-    const updatedCustomers = customers.map(c =>
-      c.id === selectedCustomer.id
-        ? {
-          ...c,
-          name: customerForm.name,
-          phone: customerForm.phone,
-          address: customerForm.address,
-          email: customerForm.email,
-          gstin: customerForm.gstin,
-          customerType: customerForm.customerType,
-          status: customerForm.status,
-          updatedAt: new Date().toISOString().split('T')[0]
-        }
-        : c
-    );
-
-    setCustomers(updatedCustomers);
-    localStorage.setItem('customers', JSON.stringify(updatedCustomers));
-
-    // Success Animation Trigger
-    setIsUpdateSuccess(true);
-
-    // Close modal after delay
-    setTimeout(() => {
-      setIsUpdateSuccess(false);
-      setShowEditModal(false);
-      setSelectedCustomer(null);
-    }, 1500);
   };
 
-  // Delete Modal State
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
-
   const handleDeleteCustomer = (customer: Customer) => {
+    // ... (keep existing UI state logic for modal)
     setDeleteTarget(customer);
     setShowDeleteModal(true);
     setShowDeleteSuccess(false);
     setIsDeleting(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-
     setIsDeleting(true);
 
-    // Simulate processing time for glitch effect
-    setTimeout(() => {
-      const updatedCustomers = customers.filter(c => c.id !== deleteTarget.id);
-      setCustomers(updatedCustomers);
-      localStorage.setItem('customers', JSON.stringify(updatedCustomers));
-
+    const success = await customerService.deleteCustomer(deleteTarget.id);
+    if (success) {
+      setCustomers(customers.filter(c => c.id !== deleteTarget.id));
       setIsDeleting(false);
       setShowDeleteSuccess(true);
-
-      // Close modal after success animation
       setTimeout(() => {
         setShowDeleteModal(false);
         setDeleteTarget(null);
         setShowDeleteSuccess(false);
       }, 2000);
-    }, 1500);
+    } else {
+      setIsDeleting(false);
+      alert('Failed to delete customer');
+    }
+  };
+
+  const handleExportExcel = (range: string) => {
+    try {
+      const dataToExport = filteredCustomers.map(c => ({
+        'Customer ID': c.id,
+        'Name': c.name,
+        'Phone': c.phone,
+        'Email': c.email || '',
+        'Address': c.address || '',
+        'GSTIN': c.gstin || '',
+        'Type': c.customerType,
+        'Status': c.status,
+        'Total Purchases': c.totalPurchases,
+        'Total Orders': c.totalOrders,
+        'Last Purchase': c.lastPurchaseDate || ''
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(dataToExport);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Customers");
+      XLSX.writeFile(wb, `Customers_Report_${range}_${new Date().toISOString().split('T')[0]}.xlsx`);
+      setShowExportModal(false);
+    } catch (error) {
+      console.error("Excel Export failed", error);
+      alert("Failed to export to Excel");
+    }
+  };
+
+  const handleViewHistory = (customer: Customer) => {
+    setSelectedCustomer(customer);
+    setShowHistoryModal(true);
+  };
+
+  const handleViewBill = (billId: string) => {
+    if (!selectedCustomer) return;
+    navigate(`/customers/${selectedCustomer.id}/bill/${billId}`);
+  };
+
+  const openEditModal = (customer: Customer) => {
+    setSelectedCustomer(customer);
+    setCustomerForm({
+      name: customer.name,
+      phone: customer.phone.replace('+91 ', ''),
+      address: customer.address || '',
+      email: customer.email || '',
+      gstin: customer.gstin || '',
+      customerType: customer.customerType || 'Retail',
+      status: customer.status || 'Active'
+    });
+    setShowEditModal(true);
   };
 
   const cancelDelete = () => {
@@ -381,106 +367,31 @@ export default function Customers() {
     setDeleteTarget(null);
   };
 
-  const handleViewHistory = (customer: Customer) => {
-    // Navigate to bill history - opens in new tab for better UX
-    // User can view bills in full page without leaving customer list
-    const invoices = customerInvoices.filter(inv =>
-      inv.customerId === customer.id ||
-      (inv.customerPhone && inv.customerPhone === customer.phone) ||
-      (!inv.customerId && inv.customerName === customer.name)
-    );
-
-    // Navigate to bill list showing all bills
-    if (invoices.length > 0) {
-      navigate(`/customers/${customer.id}/bills`);
-    } else {
-      alert('No bills found for this customer');
-    }
-  };
-
-  const openEditModal = (customer: Customer) => {
-    setSelectedCustomer(customer);
-    setCustomerForm({
-      name: customer.name,
-      phone: customer.phone,
-      address: customer.address,
-      email: customer.email,
-      gstin: customer.gstin || '',
-      customerType: customer.customerType,
-      status: customer.status
-    });
-    setShowEditModal(true);
-  };
-
-  const getDateFilter = (range: 'daily' | 'weekly' | 'monthly' | 'yearly') => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    switch (range) {
-      case 'daily':
-        return today;
-      case 'weekly':
-        const weekAgo = new Date(today);
-        weekAgo.setDate(weekAgo.getDate() - 7);
-        return weekAgo;
-      case 'monthly':
-        const monthAgo = new Date(today);
-        monthAgo.setDate(monthAgo.getDate() - 30);
-        return monthAgo;
-      case 'yearly':
-        const yearAgo = new Date(today);
-        yearAgo.setFullYear(yearAgo.getFullYear() - 1);
-        return yearAgo;
-    }
-  };
-
-  const handleExportExcel = (dateRange: 'daily' | 'weekly' | 'monthly' | 'yearly') => {
-    const filterDate = getDateFilter(dateRange);
-
-    // Filter customers by last purchase date
-    const filteredCustomers = customers.filter(c => {
-      if (!c.lastPurchaseDate || c.lastPurchaseDate === 'Never') return false;
-      const purchaseDate = new Date(c.lastPurchaseDate);
-      return purchaseDate >= filterDate;
-    });
-
-    const rangeLabel = dateRange === 'daily' ? 'Today' :
-      dateRange === 'weekly' ? 'Last_7_Days' :
-        dateRange === 'monthly' ? 'Last_30_Days' : 'Last_Year';
-
-    const ws = XLSX.utils.json_to_sheet(filteredCustomers.map(c => ({
-      'Customer ID': c.id,
-      'Name': c.name,
-      'Phone': c.phone,
-      'Address': c.address,
-      'Email': c.email,
-      'GSTIN': c.gstin || '-',
-      'Type': c.customerType,
-      'Status': c.status,
-      'Total Purchases': c.totalPurchases,
-      'Latest Invoice': (() => {
-        const myInvoices = customerInvoices.filter(inv =>
-          inv.customerId === c.id ||
-          (inv.customerPhone && inv.customerPhone === c.phone) ||
-          (!inv.customerId && inv.customerName === c.name)
-        );
-        const lastInvoice = [...myInvoices].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-        return lastInvoice ? lastInvoice.invoiceNumber : '-';
-      })(),
-      'Total Orders': c.totalOrders,
-      'Last Purchase': c.lastPurchaseDate
-    })));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Customers");
-
-    const filename = `VK_INFOTECH_DETAILS_${rangeLabel}.xlsx`;
-    XLSX.writeFile(wb, filename);
-    setShowExportModal(false);
-  };
 
 
 
+  // Derived State & Stats
+  const filteredCustomers = (customers || []).filter(customer => {
+    const matchesSearch = (customer.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (customer.phone?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (customer.id?.toLowerCase() || '').includes(searchTerm.toLowerCase());
+    const matchesType = !filterType || customer.customerType === filterType;
+    const matchesStatus = !filterStatus || customer.status === filterStatus;
+    return matchesSearch && matchesType && matchesStatus;
+  });
 
+  const totalCustomers = customers.length;
+  const activeCustomers = customers.filter(c => c.status === 'Active').length;
+
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+  const newCustomersMonth = customers.filter(c => {
+    if (!c.createdAt) return false;
+    const d = new Date(c.createdAt);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  }).length;
+
+  const topCustomers = [...customers].sort((a, b) => b.totalPurchases - a.totalPurchases).slice(0, 4);
 
   return (
     <div className="space-y-6">
@@ -615,32 +526,47 @@ export default function Customers() {
                 <th className="text-left py-4 px-4 text-gray-600 font-semibold">Orders</th>
                 <th className="text-left py-4 px-4 text-gray-600 font-semibold">Payment Mode</th>
                 <th className="text-left py-4 px-4 text-gray-600 font-semibold">Due Details</th>
-                <th className="text-center py-4 px-4 text-gray-600 font-semibold">Action</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                  Branch
+                </th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                  Created By
+                </th>
+                <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                  Actions
+                </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-gray-200">
               {filteredCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-8 text-gray-500">
-                    No customers found
+                  <td colSpan={13} className="px-6 py-12 text-center text-gray-500">
+                    <Users className="w-12 h-12 mx-auto text-gray-300 mb-3" />
+                    <p className="text-lg font-medium">No customers found</p>
+                    <p className="text-sm">Try adjusting your search or add a new customer</p>
                   </td>
                 </tr>
               ) : (
                 filteredCustomers.map((customer) => {
                   // Derive details from invoices
                   const myInvoices = customerInvoices.filter(inv =>
-                    inv.customerId === customer.id ||
-                    (inv.customerPhone && inv.customerPhone === customer.phone) ||
-                    (!inv.customerId && inv.customerName === customer.name)
+                    (inv.customerId && inv.customerId === customer.id) ||
+                    (inv.customerPhone && customer.phone && inv.customerPhone === customer.phone) ||
+                    (!inv.customerId && inv.customerName && customer.name && inv.customerName === customer.name)
                   );
 
                   // Payment Mode (Last used)
-                  const lastInvoice = [...myInvoices].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+                  // Payment Mode (Last used)
+                  const lastInvoice = [...myInvoices].sort((a, b) => {
+                    const dateA = a.date ? new Date(a.date).getTime() : 0;
+                    const dateB = b.date ? new Date(b.date).getTime() : 0;
+                    return dateB - dateA;
+                  })[0];
                   const lastPaymentMode = lastInvoice ? lastInvoice.paymentMode : '-';
 
                   // Due Details
-                  const unpaidInvoices = myInvoices.filter(inv => inv.balance > 0);
-                  const totalDue = unpaidInvoices.reduce((sum, inv) => sum + inv.balance, 0);
+                  const unpaidInvoices = myInvoices.filter(inv => (inv.balance || 0) > 0);
+                  const totalDue = unpaidInvoices.reduce((sum, inv) => sum + (inv.balance || 0), 0);
                   const dueText = totalDue > 0 ? `₹${totalDue.toLocaleString()}` : 'Nil';
 
                   const totalPaid = myInvoices.reduce((sum, inv) => sum + (inv.paidAmount || 0), 0);
@@ -767,111 +693,149 @@ export default function Customers() {
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-2xl font-bold text-gray-800">Add New Customer</h2>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => { setShowAddModal(false); setIsAddSuccess(false); setAddError(''); }}
                 className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 <X size={24} />
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            {isAddSuccess ? (
+              <div className="p-12 flex flex-col items-center justify-center min-h-[350px]">
+                <div className="relative w-24 h-24 mb-6">
+                  <div className="absolute inset-0 border-4 border-green-500 rounded-full animate-[ping_1s_ease-out_infinite]"></div>
+                  <div className="absolute inset-0 flex items-center justify-center bg-green-500 rounded-full animate-[bounce_0.5s_ease-out]">
+                    <CheckCircle size={48} className="text-white" />
+                  </div>
+                </div>
+                <h3 className="text-3xl font-black text-green-600 uppercase tracking-widest animate-pulse mb-2">
+                  Added!
+                </h3>
+                <p className="text-gray-500 font-medium mb-6">
+                  Customer successfully added to database.
+                </p>
+                <button
+                  onClick={() => {
+                    setIsAddSuccess(false);
+                    setShowAddModal(false);
+                  }}
+                  className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold shadow-lg transition-all hover:scale-105"
+                >
+                  OK
+                </button>
+              </div>
+            ) : (
+              <div className="p-6 space-y-4">
+                {addError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg font-medium text-sm">
+                    {addError}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-gray-700 text-sm mb-2 font-medium">Customer Name *</label>
+                    <input
+                      type="text"
+                      value={customerForm.name}
+                      onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })}
+                      className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
+                      placeholder="Enter customer name"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 text-sm mb-2 font-medium">Phone Number *</label>
+                    <div className="flex items-center border border-gray-300 rounded-lg bg-white focus-within:ring-2 focus-within:ring-green-500">
+                      <span className="pl-4 pr-1 py-2 text-gray-800 font-semibold select-none whitespace-nowrap">+91</span>
+                      <input
+                        type="tel"
+                        value={customerForm.phone}
+                        onChange={(e) => {
+                          const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                          setCustomerForm({ ...customerForm, phone: digits });
+                        }}
+                        className="w-full px-2 py-2 bg-transparent text-gray-800 focus:outline-none"
+                        placeholder="9876543210"
+                        maxLength={10}
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block text-gray-700 text-sm mb-2 font-medium">Customer Name *</label>
+                  <label className="block text-gray-700 text-sm mb-2 font-medium">Email (Optional)</label>
+                  <input
+                    type="email"
+                    value={customerForm.email}
+                    onChange={(e) => setCustomerForm({ ...customerForm, email: e.target.value })}
+                    className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="customer@email.com"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-gray-700 text-sm mb-2 font-medium">GSTIN (Optional)</label>
                   <input
                     type="text"
-                    value={customerForm.name}
-                    onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })}
-                    className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
-                    placeholder="Enter customer name"
+                    value={customerForm.gstin}
+                    onChange={(e) => setCustomerForm({ ...customerForm, gstin: e.target.value.toUpperCase() })}
+                    className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500 uppercase"
+                    placeholder="GSTIN Number"
+                    maxLength={15}
                   />
                 </div>
+
                 <div>
-                  <label className="block text-gray-700 text-sm mb-2 font-medium">Phone Number *</label>
-                  <input
-                    type="tel"
-                    value={customerForm.phone}
-                    onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })}
+                  <label className="block text-gray-700 text-sm mb-2 font-medium">Address</label>
+                  <textarea
+                    value={customerForm.address}
+                    onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })}
                     className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
-                    placeholder="+91 9876543210"
+                    rows={3}
+                    placeholder="Enter customer address"
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-gray-700 text-sm mb-2 font-medium">Email (Optional)</label>
-                <input
-                  type="email"
-                  value={customerForm.email}
-                  onChange={(e) => setCustomerForm({ ...customerForm, email: e.target.value })}
-                  className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
-                  placeholder="customer@email.com"
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-700 text-sm mb-2 font-medium">GSTIN (Optional)</label>
-                <input
-                  type="text"
-                  value={customerForm.gstin}
-                  onChange={(e) => setCustomerForm({ ...customerForm, gstin: e.target.value.toUpperCase() })}
-                  className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500 uppercase"
-                  placeholder="GSTIN Number"
-                  maxLength={15}
-                />
-              </div>
-
-              <div>
-                <label className="block text-gray-700 text-sm mb-2 font-medium">Address</label>
-                <textarea
-                  value={customerForm.address}
-                  onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })}
-                  className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
-                  rows={3}
-                  placeholder="Enter customer address"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-700 text-sm mb-2 font-medium">Customer Type</label>
-                  <select
-                    value={customerForm.customerType}
-                    onChange={(e) => setCustomerForm({ ...customerForm, customerType: e.target.value as 'Retail' | 'Wholesale' })}
-                    className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
-                  >
-                    <option value="Retail">Retail</option>
-                    <option value="Wholesale">Wholesale</option>
-                  </select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-gray-700 text-sm mb-2 font-medium">Customer Type</label>
+                    <select
+                      value={customerForm.customerType}
+                      onChange={(e) => setCustomerForm({ ...customerForm, customerType: e.target.value as 'Retail' | 'Wholesale' })}
+                      className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
+                    >
+                      <option value="Retail">Retail</option>
+                      <option value="Wholesale">Wholesale</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 text-sm mb-2 font-medium">Status</label>
+                    <select
+                      value={customerForm.status}
+                      onChange={(e) => setCustomerForm({ ...customerForm, status: e.target.value as 'Active' | 'Inactive' })}
+                      className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Inactive">Inactive</option>
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-gray-700 text-sm mb-2 font-medium">Status</label>
-                  <select
-                    value={customerForm.status}
-                    onChange={(e) => setCustomerForm({ ...customerForm, status: e.target.value as 'Active' | 'Inactive' })}
-                    className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
+
+                <div className="flex gap-3 pt-4 border-t border-gray-200">
+                  <button
+                    onClick={() => setShowAddModal(false)}
+                    className="flex-1 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-semibold transition-all"
                   >
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleAddCustomer}
+                    className="flex-1 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold shadow-lg transition-all hover:scale-105"
+                  >
+                    Add Customer
+                  </button>
                 </div>
               </div>
-
-              <div className="flex gap-3 pt-4 border-t border-gray-200">
-                <button
-                  onClick={() => setShowAddModal(false)}
-                  className="flex-1 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-semibold transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleAddCustomer}
-                  className="flex-1 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold shadow-lg transition-all hover:scale-105"
-                >
-                  Add Customer
-                </button>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -904,13 +868,20 @@ export default function Customers() {
                 </div>
                 <div>
                   <label className="block text-gray-700 text-sm mb-2 font-medium">Phone Number *</label>
-                  <input
-                    type="tel"
-                    value={customerForm.phone}
-                    onChange={(e) => setCustomerForm({ ...customerForm, phone: e.target.value })}
-                    className="w-full px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
-                    placeholder="+91 9876543210"
-                  />
+                  <div className="flex items-center border border-gray-300 rounded-lg bg-white focus-within:ring-2 focus-within:ring-green-500">
+                    <span className="pl-4 pr-1 py-2 text-gray-800 font-semibold select-none whitespace-nowrap">+91</span>
+                    <input
+                      type="tel"
+                      value={customerForm.phone}
+                      onChange={(e) => {
+                        const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                        setCustomerForm({ ...customerForm, phone: digits });
+                      }}
+                      className="w-full px-2 py-2 bg-transparent text-gray-800 focus:outline-none"
+                      placeholder="9876543210"
+                      maxLength={10}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1129,18 +1100,27 @@ export default function Customers() {
                                 </td>
                                 <td className="py-3 px-3 text-gray-600">{invoice.paymentMode}</td>
                                 <td className="py-3 px-3 text-center">
-                                  <button
-                                    onClick={() => selectedCustomer && handleDownloadPDF(invoice, selectedCustomer)}
-                                    disabled={downloadingInvoiceId === invoice.id || isBatchDownloading}
-                                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
-                                    title="Download PDF"
-                                  >
-                                    {downloadingInvoiceId === invoice.id ? (
-                                      <div className="w-4 h-4 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
-                                    ) : (
-                                      <Download size={18} />
-                                    )}
-                                  </button>
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      onClick={() => handleViewBill(invoice.id)}
+                                      className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                      title="View Bill"
+                                    >
+                                      <Eye size={18} />
+                                    </button>
+                                    <button
+                                      onClick={() => selectedCustomer && handleDownloadPDF(invoice, selectedCustomer)}
+                                      disabled={downloadingInvoiceId === invoice.id || isBatchDownloading}
+                                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50"
+                                      title="Download PDF"
+                                    >
+                                      {downloadingInvoiceId === invoice.id ? (
+                                        <div className="w-4 h-4 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
+                                      ) : (
+                                        <Download size={18} />
+                                      )}
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}

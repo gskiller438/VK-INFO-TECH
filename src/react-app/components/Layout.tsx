@@ -65,6 +65,12 @@ export default function Layout({ children }: LayoutProps) {
   const user = authService.getCurrentUser();
 
   const handleLogout = () => {
+    setShowLogoutModal(true);
+  };
+
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+
+  const confirmLogout = () => {
     authService.logout();
     navigate('/login');
   };
@@ -89,7 +95,7 @@ export default function Layout({ children }: LayoutProps) {
           <div className={`flex items-center ${sidebarOpen ? 'justify-between' : 'justify-center'}`}>
             {sidebarOpen && (
               <div className="flex flex-col animate-in fade-in slide-in-from-left duration-500">
-                <h1 className="text-2xl font-bold text-green-400 bg-gradient-to-r from-green-400 to-emerald-300 bg-clip-text text-transparent company-name-font">VK INFO TECH</h1>
+                <h1 className="text-2xl font-bold text-green-400 bg-gradient-to-r from-green-400 to-emerald-300 bg-clip-text text-transparent company-name-font">VK INFOTECH</h1>
               </div>
             )}
             <button
@@ -176,6 +182,33 @@ export default function Layout({ children }: LayoutProps) {
           {children}
         </main>
       </div>
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[9999]">
+          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 text-center border border-gray-200 animate-in fade-in zoom-in duration-200">
+            <div className="w-16 h-16 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
+              <LogOut size={32} className="text-red-600" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-800 mb-2">Logout Confirmation</h3>
+            <p className="text-gray-500 mb-6">Are you sure you want to logout?</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowLogoutModal(false)}
+                className="flex-1 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-semibold transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmLogout}
+                className="flex-1 px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold shadow-lg transition-all hover:scale-105"
+              >
+                OK, Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

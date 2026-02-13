@@ -42,8 +42,10 @@ const prepareVisibleInvoiceDOM = (rootElement?: HTMLElement): HTMLElement => {
         pageClone.style.transform = 'none';
         pageClone.style.overflow = 'visible';
 
-        // Ensure background is white
+        // Ensure background is white and colors are preserved for print
         pageClone.style.backgroundColor = '#ffffff';
+        (pageClone.style as any).webkitPrintColorAdjust = 'exact';
+        pageClone.style.printColorAdjust = 'exact';
 
         // Add Page Break
         if (index < pages.length - 1) {
@@ -77,6 +79,12 @@ const prepareVisibleInvoiceDOM = (rootElement?: HTMLElement): HTMLElement => {
             span.style.fontWeight = 'bold';
 
             el.parentElement?.replaceChild(span, el);
+        });
+
+        // Re-assign image sources to cloned images to ensure they load in the fragment
+        pageClone.querySelectorAll('img').forEach(img => {
+            const originalSrc = img.getAttribute('src');
+            if (originalSrc) img.src = originalSrc;
         });
 
         wrapper.appendChild(pageClone);
@@ -132,7 +140,6 @@ export const generateInvoicePDF = async (_company: CompanyDetails, data: Invoice
 
         // Create or use existing PDF instance
         const pdf = options?.pdfInstance || new jsPDF('p', 'mm', 'a4');
-        const pdfWidth = 210;
 
         // Select the cloned pages
         // Note: prepareVisibleInvoiceDOM appends page clones directly to wrapper
@@ -141,22 +148,33 @@ export const generateInvoicePDF = async (_company: CompanyDetails, data: Invoice
         for (let i = 0; i < pages.length; i++) {
             const page = pages[i];
 
-            // Capture the page
+            // Force dimensions for consistent capture
+            page.style.width = '210mm';
+            page.style.height = '297mm';
+
+            // Capture the page with high resolution but exact dimensions
             const canvas = await html2canvas(page, {
-                scale: 2,
+                scale: 3, // Higher resolution
                 useCORS: true,
                 allowTaint: true,
                 backgroundColor: '#ffffff',
                 logging: false,
+                width: page.offsetWidth,
+                height: page.offsetHeight,
+                windowWidth: page.offsetWidth,
+                windowHeight: page.offsetHeight,
                 scrollX: 0,
                 scrollY: 0
             });
 
-            const imgData = canvas.toDataURL('image/png');
-            const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+            const imgData = canvas.toDataURL('image/png', 1.0);
 
-            if (i > 0 || (options?.pdfInstance && true)) pdf.addPage();
-            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, imgHeight);
+            if (i > 0 || (options?.pdfInstance)) {
+                pdf.addPage('a4', 'p');
+            }
+
+            // Fill the entire PDF page (210mm x 297mm)
+            pdf.addImage(imgData, 'PNG', 0, 0, 210, 297, undefined, 'FAST');
         }
 
         if (options?.save !== false) {

@@ -3,9 +3,19 @@
 @tailwind utilities;
 
 /* Custom Company Name Font */
+/* Custom Company Name Font */
 @font-face {
   font-family: 'CompanyFont';
-  src: url('/company-name-font.ttf') format('truetype');
+  src: url('/company-name-font-new.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Zyana Slogan Font */
+@font-face {
+  font-family: 'ZyanaRegular';
+  src: url('/fonts/Zyana-Regular.ttf') format('truetype');
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -145,5 +155,57 @@ body {
   to {
     transform: translateY(0);
     opacity: 1;
+  }
+}
+
+/* A4 Print Optimization */
+@page {
+  size: A4;
+  margin: 0;
+}
+
+@media print {
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    background-color: white !important;
+  }
+
+  /* Hide everything except bill content */
+  #invoice-print-wrapper,
+  .flex-col.gap-8.pb-32 {
+    background-color: white !important;
+  }
+
+  .max-w-\[210mm\]>*:not(.flex-col) {
+    display: none !important;
+  }
+
+  .flex-col.gap-8.pb-32 {
+    gap: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  .invoice-page {
+    width: 210mm !important;
+    height: 297mm !important;
+    margin: 0 !important;
+    padding: 10mm !important;
+    border: 2px solid black !important;
+    box-shadow: none !important;
+    page-break-after: always;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+    background-color: white !important;
+  }
+
+  /* Force background and colors */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }

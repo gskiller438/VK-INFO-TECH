@@ -41,7 +41,7 @@ export default function InvoiceTemplate({ company, data }: InvoiceTemplateProps)
 
               <div className="flex-1 flex flex-col items-center justify-center text-center h-full">
                 <h1 className="text-4xl font-bold text-[#22c55e] tracking-wider font-serif uppercase">{company.name}</h1>
-                <p className="text-xs font-bold mt-1 text-gray-700">Complete Technology Solution Provider</p>
+                <p className="text-xs font-bold mt-1 text-gray-700" style={{ fontFamily: 'ZyanaRegular, serif' }}>Complete Technology Solution Provider</p>
               </div>
 
               <div className="w-[150px] h-full flex flex-col items-end justify-start p-4 text-right">
@@ -63,7 +63,7 @@ export default function InvoiceTemplate({ company, data }: InvoiceTemplateProps)
                 <h3 className="font-bold text-sm mb-1 uppercase text-blue-800">Bill To</h3>
                 <div className="font-bold uppercase break-words w-full">{data.customerName}</div>
                 <div className="break-words w-full whitespace-pre-wrap text-gray-700">{data.customerAddress}</div>
-                <div className="mt-auto font-bold">Phone No: {data.customerPhone}</div>
+                <div className="mt-auto font-bold">ph no ; +91 {data.customerPhone.replace(/^\+91\s*/, '')}</div>
               </div>
 
               <div className="flex-1 flex flex-col text-[11px]">

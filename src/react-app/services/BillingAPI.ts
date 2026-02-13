@@ -1,16 +1,24 @@
 import { InvoiceData } from '../types';
+import { authService } from './AuthService';
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
 export const BillingAPI = {
     generateWordInvoice: async (data: InvoiceData) => {
         try {
+            const user = authService.getCurrentUser();
+            const enrichedData = {
+                ...data,
+                branch: user?.branch || 'Main',
+                createdBy: user?.username || 'System'
+            };
+
             const response = await fetch(`${API_BASE_URL}/generate-invoice`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(data),
+                body: JSON.stringify(enrichedData),
             });
 
             if (!response.ok) {
@@ -31,6 +39,34 @@ export const BillingAPI = {
             return true;
         } catch (error) {
             console.error('Error generating Word invoice:', error);
+            throw error;
+        }
+    },
+
+    createInvoice: async (invoiceData: any) => {
+        try {
+            const user = authService.getCurrentUser();
+            const enrichedData = {
+                ...invoiceData,
+                branch: user?.branch || 'Main',
+                createdBy: user?.username || 'System'
+            };
+
+            const response = await fetch(`${API_BASE_URL}/invoices`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(enrichedData),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Unknown Error' }));
+                throw new Error(errorData.error || errorData.details || 'Failed to create invoice');
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Error creating invoice:', error);
             throw error;
         }
     }

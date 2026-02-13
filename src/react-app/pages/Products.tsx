@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { productService } from '../services/ProductService';
+import { productService, Product } from '../services/ProductService';
 import {
   Plus,
   Search,
@@ -20,29 +20,30 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-interface Product {
-  id: string;
-  name: string;
-  brand: string;
-  category: string;
-  description: string;
-  price: number;
-  stock: number;
-  minStock: number;
-  unit: string;
-  status: 'Active' | 'Inactive';
-  serialNumber?: string;
-  model?: string;
-  warranty?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export default function Products() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Load products
+  // Load products
+  const loadProducts = async () => {
+    try {
+      setLoading(true);
+      const data = await productService.getAllProducts().catch(err => {
+        console.error("Error fetching products:", err);
+        return [];
+      });
+      setProducts(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Failed to load products", error);
+      setProducts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    setProducts(productService.getAllProducts());
+    loadProducts();
   }, []);
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -73,7 +74,7 @@ export default function Products() {
 
   const categories = ['CCTV Access', 'Laptop', 'PC', 'Accessories'];
   const brands = ['Samsung', 'Apple', 'HP', 'Sony', 'Dell', 'LG', 'Lenovo', 'OnePlus'];
-  const units = ['pcs', 'box'];
+  const units = ['pcs', 'box', 'nos'];
 
   const getStockStatus = (stock: number, minStock: number) => {
     if (stock === 0) return { label: 'Out of Stock', color: 'text-red-400', bg: 'bg-red-500/20', icon: XCircle };
@@ -81,10 +82,10 @@ export default function Products() {
     return { label: 'Available', color: 'text-green-400', bg: 'bg-green-500/20', icon: CheckCircle };
   };
 
-  const filteredProducts = products.filter(product => {
-    const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.brand.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.id.toLowerCase().includes(searchTerm.toLowerCase());
+  const filteredProducts = (products || []).filter(product => {
+    const matchesSearch = (product.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (product.brand?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (product.id?.toLowerCase() || '').includes(searchTerm.toLowerCase());
     const matchesCategory = !filterCategory || product.category === filterCategory;
     const matchesBrand = !filterBrand || product.brand === filterBrand;
     const matchesStatus = !filterStatus || product.status === filterStatus;
@@ -145,26 +146,26 @@ export default function Products() {
     setIsDeleting(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
 
     setIsDeleting(true);
 
-    // Simulate processing time 
-    setTimeout(() => {
-      productService.deleteProduct(deleteTarget.id);
-      setProducts(productService.getAllProducts());
-
+    const success = await productService.deleteProduct(deleteTarget.id);
+    if (success) {
+      setProducts(products.filter(p => p.id !== deleteTarget.id));
       setIsDeleting(false);
       setShowDeleteSuccess(true);
 
-      // Close modal
       setTimeout(() => {
         setShowDeleteModal(false);
         setDeleteTarget(null);
         setShowDeleteSuccess(false);
       }, 2000);
-    }, 1500);
+    } else {
+      setIsDeleting(false);
+      alert('Failed to delete product');
+    }
   };
 
   const cancelDelete = () => {
@@ -172,7 +173,7 @@ export default function Products() {
     setDeleteTarget(null);
   };
 
-  const handleSaveProduct = () => {
+  const handleSaveProduct = async () => {
     // Validation
     const errors: Record<string, boolean> = {};
     if (!formData.name) errors.name = true;
@@ -189,7 +190,7 @@ export default function Products() {
 
     if (editingProduct) {
       // Update existing product
-      productService.updateProduct(editingProduct.id, {
+      const updated = await productService.updateProduct(editingProduct.id, {
         name: formData.name,
         brand: formData.brand,
         category: formData.category,
@@ -198,16 +199,27 @@ export default function Products() {
         stock: parseInt(formData.stock),
         minStock: parseInt(formData.minStock),
         unit: formData.unit,
-        status: formData.status as 'Active' | 'Inactive',
+        status: formData.status,
         serialNumber: formData.serialNumber,
         model: formData.model,
         warranty: formData.warranty,
         updatedAt: new Date().toISOString().split('T')[0]
       });
-      alert('Product updated successfully');
+
+      if (updated) {
+        setProducts(products.map(p => p.id === editingProduct.id ? updated : p));
+        setIsAddSuccess(true);
+        setTimeout(() => {
+          setIsAddSuccess(false);
+          setShowAddModal(false);
+        }, 1500);
+      } else {
+        alert('Failed to update product');
+      }
+
     } else {
       // Add new product
-      productService.addProduct({
+      const newProduct = await productService.addProduct({
         name: formData.name,
         brand: formData.brand,
         category: formData.category,
@@ -216,22 +228,37 @@ export default function Products() {
         stock: parseInt(formData.stock),
         minStock: parseInt(formData.minStock),
         unit: formData.unit,
-        status: formData.status as 'Active' | 'Inactive',
+        status: formData.status,
         serialNumber: formData.serialNumber,
         model: formData.model,
-        warranty: formData.warranty,
-        createdAt: new Date().toISOString().split('T')[0],
-        updatedAt: new Date().toISOString().split('T')[0]
+        warranty: formData.warranty
       });
 
-      setProducts(productService.getAllProducts());
-
-      // Success Animation
-      setIsAddSuccess(true);
-      return;
+      if (newProduct) {
+        setProducts([...products, newProduct]);
+        setIsAddSuccess(true);
+        setFormData({
+          name: '',
+          brand: '',
+          category: '',
+          description: '',
+          price: '',
+          stock: '',
+          minStock: '',
+          unit: 'pcs',
+          status: 'Active',
+          serialNumber: '',
+          model: '',
+          warranty: ''
+        });
+        setTimeout(() => {
+          setIsAddSuccess(false);
+          setShowAddModal(false);
+        }, 1500);
+      } else {
+        alert('Failed to add product');
+      }
     }
-
-    setProducts(productService.getAllProducts());
   };
 
   // ... (rest of the file until the button)
@@ -443,6 +470,8 @@ export default function Products() {
                 <th className="text-left py-4 px-4 text-gray-600 font-bold">Price</th>
                 <th className="text-left py-4 px-4 text-gray-600 font-bold">Stock</th>
                 <th className="text-left py-4 px-4 text-gray-600 font-bold">Status</th>
+                <th className="text-left py-4 px-4 text-gray-600 font-bold">Branch</th>
+                <th className="text-left py-4 px-4 text-gray-600 font-bold">Created By</th>
                 <th className="text-left py-4 px-4 text-gray-600 font-bold">Updated</th>
                 <th className="text-left py-4 px-4 text-gray-600 font-bold">Actions</th>
               </tr>
@@ -450,7 +479,7 @@ export default function Products() {
             <tbody>
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="text-center py-8 text-gray-500">
+                  <td colSpan={11} className="text-center py-8 text-gray-500">
                     No products found
                   </td>
                 </tr>
@@ -488,6 +517,14 @@ export default function Products() {
                           }`}>
                           {product.status}
                         </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-gray-600 text-sm font-medium bg-gray-100 px-2 py-1 rounded">
+                          {product.branch || 'Main'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-gray-500 text-sm">
+                        {product.createdBy || 'System'}
                       </td>
                       <td className="py-3 px-4 text-gray-500 text-sm">{product.updatedAt}</td>
                       <td className="py-3 px-4">
@@ -578,19 +615,16 @@ export default function Products() {
                     </div>
                     <div>
                       <label className="block text-gray-600 text-sm mb-2">Brand *</label>
-                      <select
+                      <input
+                        type="text"
                         value={formData.brand}
                         onChange={(e) => {
                           setFormData({ ...formData, brand: e.target.value });
                           if (formErrors.brand) setFormErrors({ ...formErrors, brand: false });
                         }}
                         className={`w-full px-4 py-2 bg-gray-50 border rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500 ${formErrors.brand ? 'border-red-500 ring-1 ring-red-200' : 'border-gray-300'}`}
-                      >
-                        <option value="">Select Brand</option>
-                        {brands.map(brand => (
-                          <option key={brand} value={brand}>{brand}</option>
-                        ))}
-                      </select>
+                        placeholder="Enter brand name"
+                      />
                     </div>
                     <div>
                       <label className="block text-gray-600 text-sm mb-2">Category *</label>

@@ -22,40 +22,23 @@ export interface CustomerBill {
     customerAddress?: string;
     dueDate?: string;
     products?: any[];
+    branch?: string;
+    createdBy?: string;
 }
+
+const API_URL = 'http://localhost:5000/api';
 
 export const CustomerBillsAPI = {
     /**
      * Fetch all bills for a specific customer
-     * @param customerId - Customer ID or phone number
+     * @param customerId - Customer ID
      * @returns Array of customer bills
      */
-    getCustomerBills: (customerId: string): CustomerBill[] => {
+    getCustomerBills: async (customerId: string): Promise<CustomerBill[]> => {
         try {
-            const allInvoices = JSON.parse(localStorage.getItem('invoices') || '[]');
-            const customers = JSON.parse(localStorage.getItem('customers') || '[]');
-
-            // Find customer by ID or phone
-            const customer = customers.find((c: any) =>
-                c.id === customerId || c.phone === customerId
-            );
-
-            if (!customer) {
-                console.warn(`Customer not found: ${customerId}`);
-                return [];
-            }
-
-            // Filter invoices for this customer
-            const customerBills = allInvoices.filter((inv: CustomerBill) =>
-                inv.customerId === customer.id ||
-                (inv.customerPhone && inv.customerPhone === customer.phone) ||
-                (!inv.customerId && inv.customerName === customer.name)
-            );
-
-            // Sort by date (newest first)
-            return customerBills.sort((a: CustomerBill, b: CustomerBill) =>
-                new Date(b.date).getTime() - new Date(a.date).getTime()
-            );
+            const response = await fetch(`${API_URL}/invoices/customer/${customerId}`);
+            if (!response.ok) throw new Error('Failed to fetch customer invoices');
+            return await response.json();
         } catch (error) {
             console.error('Error fetching customer bills:', error);
             return [];
@@ -67,13 +50,11 @@ export const CustomerBillsAPI = {
      * @param invoiceId - Invoice ID
      * @returns Single customer bill or null
      */
-    getCustomerBill: (invoiceId: string): CustomerBill | null => {
+    getCustomerBill: async (invoiceId: string): Promise<CustomerBill | null> => {
         try {
-            const allInvoices = JSON.parse(localStorage.getItem('invoices') || '[]');
-            const bill = allInvoices.find((inv: CustomerBill) =>
-                inv.id === invoiceId || inv.invoiceNumber === invoiceId
-            );
-            return bill || null;
+            const response = await fetch(`${API_URL}/invoices/${invoiceId}`);
+            if (!response.ok) return null;
+            return await response.json();
         } catch (error) {
             console.error('Error fetching customer bill:', error);
             return null;
@@ -82,15 +63,14 @@ export const CustomerBillsAPI = {
 
     /**
      * Get customer information by ID
-     * @param customerId - Customer ID or phone number
+     * @param customerId - Customer ID
      * @returns Customer object or null
      */
-    getCustomer: (customerId: string): any => {
+    getCustomer: async (customerId: string): Promise<any> => {
         try {
-            const customers = JSON.parse(localStorage.getItem('customers') || '[]');
-            return customers.find((c: any) =>
-                c.id === customerId || c.phone === customerId
-            ) || null;
+            const response = await fetch(`${API_URL}/customers/${customerId}`);
+            if (!response.ok) return null;
+            return await response.json();
         } catch (error) {
             console.error('Error fetching customer:', error);
             return null;
@@ -98,12 +78,28 @@ export const CustomerBillsAPI = {
     },
 
     /**
+     * Fetch all invoices (for admin/summary views)
+     * @returns Array of all invoices
+     */
+    getAllInvoices: async (): Promise<CustomerBill[]> => {
+        try {
+            const response = await fetch(`${API_URL}/invoices`);
+            if (!response.ok) throw new Error('Failed to fetch invoices');
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching all invoices:', error);
+            return [];
+        }
+    },
+
+    /**
      * Calculate customer statistics
-     * @param customerId - Customer ID or phone number
+     * @param customerId - Customer ID
      * @returns Customer statistics
      */
-    getCustomerStats: (customerId: string) => {
-        const bills = CustomerBillsAPI.getCustomerBills(customerId);
+    getCustomerStats: async (customerId: string) => {
+        // Since we don't have a stats endpoint yet, we fetch all bills and calculate
+        const bills = await CustomerBillsAPI.getCustomerBills(customerId);
 
         const totalPurchases = bills.reduce((sum, bill) => sum + bill.amount, 0);
         const totalPaid = bills.reduce((sum, bill) => sum + bill.paidAmount, 0);

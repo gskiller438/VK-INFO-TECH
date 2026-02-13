@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router';
 import { ArrowLeft, Download, Eye, Loader2, Package } from 'lucide-react';
 import { CompanyDetails, InvoiceData } from '../types';
 import { downloadSingleInvoicePDF, downloadBatchInvoicesAsZip } from '../services/BackgroundPDFGenerator';
+import { CustomerBillsAPI } from '../services/CustomerBillsAPI';
+import { customerService } from '../services/CustomerService';
 
 interface Invoice {
     id: string;
@@ -52,7 +54,7 @@ export default function CustomerBillList() {
 
     // Company details
     const companyDetails: CompanyDetails = {
-        name: 'VK INFO TECH',
+        name: 'VK INFOTECH',
         tagline: 'Complete Technology Solution Provider',
         address: '123 Tech Street, Digital City',
         mobile: '+91 9876543210',
@@ -71,41 +73,48 @@ export default function CustomerBillList() {
         loadCustomerBills();
     }, [customerId]);
 
-    const loadCustomerBills = () => {
+    const loadCustomerBills = async () => {
         try {
             setLoading(true);
             setError(null);
 
-            // Load from localStorage
-            const customers = JSON.parse(localStorage.getItem('customers') || '[]');
-            const allInvoices = JSON.parse(localStorage.getItem('invoices') || '[]');
+            // Load from API
+            const [customersRes, allInvoicesRes] = await Promise.all([
+                customerService.getAllCustomers().catch(e => []),
+                CustomerBillsAPI.getAllInvoices().catch(e => [])
+            ]);
+
+            const customers = Array.isArray(customersRes) ? customersRes : [];
+            const allInvoices = Array.isArray(allInvoicesRes) ? allInvoicesRes : [];
 
             // Find customer
-            const foundCustomer = customers.find((c: Customer) => c.id === customerId);
+            const foundCustomer = (customers as unknown as Customer[]).find((c: Customer) => c.id === customerId);
             if (!foundCustomer) {
                 setError('Customer not found');
                 setLoading(false);
                 return;
             }
+            setCustomer(foundCustomer);
 
             // Find all invoices for this customer
-            const customerInvoices = allInvoices.filter((inv: Invoice) =>
+            const customerInvoices = (allInvoices as unknown as Invoice[]).filter((inv: Invoice) =>
                 inv.customerId === customerId ||
                 (inv.customerPhone && inv.customerPhone === foundCustomer.phone) ||
                 (!inv.customerId && inv.customerName === foundCustomer.name)
             );
 
             // Sort by date (most recent first)
-            customerInvoices.sort((a: Invoice, b: Invoice) =>
-                new Date(b.date).getTime() - new Date(a.date).getTime()
-            );
+            customerInvoices.sort((a: Invoice, b: Invoice) => {
+                const dateA = a.date ? new Date(a.date).getTime() : 0;
+                const dateB = b.date ? new Date(b.date).getTime() : 0;
+                return dateB - dateA;
+            });
 
-            setCustomer(foundCustomer);
             setInvoices(customerInvoices);
             setLoading(false);
         } catch (err) {
-            console.error('Error loading bills:', err);
-            setError('Failed to load bills');
+            console.error("Error loading bills:", err);
+            setError("Failed to load bills");
             setLoading(false);
         }
     };
@@ -346,9 +355,9 @@ export default function CustomerBillList() {
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <span className={`px-2 py-1 text-xs font-medium rounded-full ${invoice.paymentMode === 'Cash' ? 'bg-green-100 text-green-700' :
-                                                        invoice.paymentMode === 'UPI' ? 'bg-blue-100 text-blue-700' :
-                                                            invoice.paymentMode === 'Card' ? 'bg-purple-100 text-purple-700' :
-                                                                'bg-gray-100 text-gray-700'
+                                                    invoice.paymentMode === 'UPI' ? 'bg-blue-100 text-blue-700' :
+                                                        invoice.paymentMode === 'Card' ? 'bg-purple-100 text-purple-700' :
+                                                            'bg-gray-100 text-gray-700'
                                                     }`}>
                                                     {invoice.paymentMode}
                                                 </span>
@@ -357,10 +366,11 @@ export default function CustomerBillList() {
                                                 <div className="flex items-center justify-center gap-2">
                                                     <button
                                                         onClick={() => handleViewBill(invoice.id)}
-                                                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                        className="flex items-center gap-1 px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-blue-100"
                                                         title="View Bill"
                                                     >
-                                                        <Eye size={18} />
+                                                        <Eye size={16} />
+                                                        <span className="text-xs font-semibold">View</span>
                                                     </button>
                                                     <button
                                                         onClick={() => handleDownloadBill(invoice)}

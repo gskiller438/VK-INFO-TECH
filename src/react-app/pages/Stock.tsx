@@ -49,10 +49,23 @@ export default function Stock() {
   const [stockLogs, setStockLogs] = useState<StockLog[]>([]);
 
   useEffect(() => {
-    // Load data
-    setProducts(productService.getAllProducts());
-    setStockLogs(stockService.getAllLogs());
+    loadData();
   }, []);
+
+  const loadData = async () => {
+    try {
+      const [fetchedProducts, fetchedLogs] = await Promise.all([
+        productService.getAllProducts().catch(err => { console.warn("Products fetch failed", err); return []; }),
+        stockService.getAllLogs().catch(err => { console.warn("Logs fetch failed", err); return []; })
+      ]);
+      setProducts(Array.isArray(fetchedProducts) ? fetchedProducts : []);
+      setStockLogs(Array.isArray(fetchedLogs) ? fetchedLogs : []);
+    } catch (error) {
+      console.error("Failed to load stock data", error);
+      setProducts([]);
+      setStockLogs([]);
+    }
+  };
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
@@ -100,7 +113,7 @@ export default function Stock() {
     OUT: ['Billing', 'Damage', 'Adjustment']
   };
 
-  // Automatic Stock Analysis - Calculate usage trends
+  // Automatic Stock Analysis - Calculate usage trends (keep as is)
   const usageTrends = useMemo(() => {
     const trends: UsageTrend[] = [];
 
@@ -128,7 +141,7 @@ export default function Stock() {
     return trends;
   }, [products, stockLogs]);
 
-  // Automatic Stock Alerts Generation
+  // Automatic Stock Alerts Generation (keep as is)
   const stockAlerts = useMemo(() => {
     const alerts: StockAlert[] = [];
 
@@ -275,7 +288,7 @@ export default function Stock() {
   };
 
 
-  const applyStockUpdate = () => {
+  const applyStockUpdate = async () => {
     if (!selectedProduct) return;
 
     const quantity = parseInt(updateForm.quantity);
@@ -284,16 +297,14 @@ export default function Stock() {
       ? oldStock + quantity
       : oldStock - quantity;
 
-    // Update product stock
-    productService.updateProduct(selectedProduct.id, {
+    // Update product stock via API
+    await productService.updateProduct(selectedProduct.id, {
       stock: newStock,
       updatedAt: new Date().toLocaleString('en-IN')
     });
-    setProducts(productService.getAllProducts()); // Refresh
 
-    // Add stock log
-    const newLog: StockLog = {
-      id: `L${Date.now()}`,
+    // Add stock log via API
+    await stockService.addLog({
       productId: selectedProduct.id,
       productName: selectedProduct.name,
       oldStock,
@@ -301,13 +312,11 @@ export default function Stock() {
       changeType: updateForm.updateType,
       quantity,
       reason: updateForm.reason,
-      remarks: updateForm.remarks,
-      updatedBy: 'Admin',
-      dateTime: new Date().toLocaleString('en-IN')
-    };
-    stockService.addLog(newLog);
+      remarks: updateForm.remarks
+    });
 
-    setStockLogs(stockService.getAllLogs()); // Refresh
+    // Refresh data
+    loadData();
 
     // Success Animation
     setIsUpdateSuccess(true);
@@ -336,19 +345,17 @@ export default function Stock() {
       `Suggested Reorder: ${trend.reorderSuggestion} ${product.unit}\n\n` +
       `This will add ${trend.reorderSuggestion} ${product.unit} to your stock.`,
       'confirm',
-      () => {
-        // Simulate reorder
+      async () => {
+        // Execute reorder
         const oldStock = product.stock;
         const newStock = oldStock + trend.reorderSuggestion;
 
-        setProducts(products.map(p =>
-          p.id === productId
-            ? { ...p, stock: newStock, updatedAt: new Date().toLocaleString('en-IN') }
-            : p
-        ));
+        await productService.updateProduct(productId, {
+          stock: newStock,
+          updatedAt: new Date().toLocaleString('en-IN')
+        });
 
-        const newLog: StockLog = {
-          id: `L${(stockLogs.length + 1).toString().padStart(3, '0')}`,
+        await stockService.addLog({
           productId: product.id,
           productName: product.name,
           oldStock,
@@ -356,18 +363,17 @@ export default function Stock() {
           changeType: 'IN',
           quantity: trend.reorderSuggestion,
           reason: 'Purchase',
-          remarks: 'Auto-reorder based on usage analysis',
-          updatedBy: 'System',
-          dateTime: new Date().toLocaleString('en-IN')
-        };
-        setStockLogs([newLog, ...stockLogs]);
+          remarks: 'Auto-reorder based on usage analysis'
+        });
+
+        loadData();
 
         triggerNotice('Success', 'Auto-reorder completed successfully!', 'success');
       }
     );
   };
 
-
+  // ... (keep getDateFilter and handleExportExcel)
   const getDateFilter = (range: 'daily' | 'weekly' | 'monthly' | 'yearly') => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -401,7 +407,7 @@ export default function Stock() {
 
     const wb = XLSX.utils.book_new();
 
-    // Sheet 1: Summary Statistics
+    // Sheet 1: Summary Statistics (keep logic)
     const totalProducts = products.length;
     const inStockProducts = products.filter(p => p.stock > p.minStock).length;
     const lowStockProducts = products.filter(p => p.stock > 0 && p.stock <= p.minStock).length;
@@ -420,7 +426,7 @@ export default function Stock() {
         dateRange === 'monthly' ? 'Last 30 Days' : 'Last Year';
 
     const summaryData = [
-      ['VK INFO TECH - STOCK SUMMARY REPORT'],
+      ['VK INFOTECH - STOCK SUMMARY REPORT'],
       ['Generated On:', new Date().toLocaleString('en-IN')],
       ['Date Range:', rangeLabel],
       [''],
@@ -458,7 +464,9 @@ export default function Stock() {
       'Price': p.price,
       'Stock Value': p.stock * p.price,
       'Status': p.status,
-      'Stock Status': p.stock === 0 ? 'Out of Stock' : p.stock <= p.minStock ? 'Low Stock' : 'Available'
+      'Stock Status': p.stock === 0 ? 'Out of Stock' : p.stock <= p.minStock ? 'Low Stock' : 'Available',
+      'Branch': p.branch || 'Main',
+      'Created By': p.createdBy || 'System'
     })));
     XLSX.utils.book_append_sheet(wb, wsStock, "Stock Details");
 
@@ -473,11 +481,12 @@ export default function Stock() {
       'Old Stock': log.oldStock,
       'New Stock': log.newStock,
       'Remarks': log.remarks || '-',
-      'Updated By': log.updatedBy
+      'Updated By': log.updatedBy,
+      'Branch': log.branch || 'Main'
     })));
     XLSX.utils.book_append_sheet(wb, wsMovements, "Stock Movements");
 
-    // Sheet 4: Category-wise Summary
+    // Sheet 4: Category-wise Summary (keep logic)
     const categoryStats = products.reduce((acc, p) => {
       if (!acc[p.category]) {
         acc[p.category] = { count: 0, totalStock: 0, totalValue: 0 };
@@ -1109,6 +1118,7 @@ export default function Stock() {
                         <th className="text-left py-3 px-3 text-gray-600 font-bold">Change</th>
                         <th className="text-left py-3 px-3 text-gray-600 font-bold">Reason</th>
                         <th className="text-left py-3 px-3 text-gray-600 font-bold">Remarks</th>
+                        <th className="text-left py-3 px-3 text-gray-600 font-bold">Branch</th>
                         <th className="text-left py-3 px-3 text-gray-600 font-bold">Updated By</th>
                       </tr>
                     </thead>
@@ -1130,7 +1140,10 @@ export default function Stock() {
                           </td>
                           <td className="py-3 px-3 text-yellow-400">{log.reason}</td>
                           <td className="py-3 px-3 text-gray-400 text-sm">{log.remarks || '-'}</td>
-                          <td className="py-3 px-3 text-blue-200">{log.updatedBy}</td>
+                          <td className="py-3 px-3 text-gray-500 text-sm">
+                            {log.branch || 'Main'}
+                          </td>
+                          <td className="py-3 px-3 text-blue-500">{log.updatedBy}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1271,7 +1284,7 @@ export default function Stock() {
           <div className="bg-white rounded-2xl shadow-2xl w-[450px] overflow-hidden transform animate-in zoom-in-95 slide-in-from-bottom-10 duration-500 border-4 border-white">
             {/* Header / Icon Section */}
             <div className={`h-32 flex items-center justify-center relative overflow-hidden ${noticeConfig.type === 'success' ? 'bg-green-500' :
-                noticeConfig.type === 'error' ? 'bg-red-500' : 'bg-blue-500'
+              noticeConfig.type === 'error' ? 'bg-red-500' : 'bg-blue-500'
               }`}>
               {/* Background Shapes for Animation */}
               <div className="absolute inset-0 opacity-20">
@@ -1324,7 +1337,7 @@ export default function Stock() {
                 <button
                   onClick={() => setShowNotice(false)}
                   className={`min-w-[150px] px-8 py-3 rounded-xl font-bold transition-all uppercase text-sm tracking-widest text-white shadow-lg ${noticeConfig.type === 'success' ? 'bg-green-500 shadow-green-200' :
-                      noticeConfig.type === 'error' ? 'bg-red-500 shadow-red-200' : 'bg-blue-500 shadow-blue-200'
+                    noticeConfig.type === 'error' ? 'bg-red-500 shadow-red-200' : 'bg-blue-500 shadow-blue-200'
                     }`}
                 >
                   Okay

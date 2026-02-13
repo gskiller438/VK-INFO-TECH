@@ -4,6 +4,8 @@ import { ArrowLeft, Download, Printer, Loader2 } from 'lucide-react';
 import InvoiceTemplate from '../components/invoice/InvoiceTemplate';
 import { CompanyDetails, InvoiceData } from '../types';
 import { downloadSingleInvoicePDF } from '../services/BackgroundPDFGenerator';
+import { CustomerBillsAPI } from '../services/CustomerBillsAPI';
+import { customerService } from '../services/CustomerService';
 
 interface Invoice {
     id: string;
@@ -53,7 +55,7 @@ export default function InvoiceView() {
 
     // Company details (should match Billing page)
     const companyDetails: CompanyDetails = {
-        name: 'VK INFO TECH',
+        name: 'VK INFOTECH',
         tagline: 'Complete Technology Solution Provider',
         address: '123 Tech Street, Digital City',
         mobile: '+91 9876543210',
@@ -72,17 +74,23 @@ export default function InvoiceView() {
         loadInvoiceData();
     }, [customerId, billId]);
 
-    const loadInvoiceData = () => {
+    const loadInvoiceData = async () => {
         try {
             setLoading(true);
             setError(null);
 
-            // Load from localStorage
-            const invoices = JSON.parse(localStorage.getItem('invoices') || '[]');
-            const customers = JSON.parse(localStorage.getItem('customers') || '[]');
+            // Load from API
+            const [invoicesRes, customersRes] = await Promise.all([
+                CustomerBillsAPI.getAllInvoices().catch(e => []),
+                customerService.getAllCustomers().catch(e => [])
+            ]);
+
+            const invoices = Array.isArray(invoicesRes) ? invoicesRes : [];
+            const customers = Array.isArray(customersRes) ? customersRes : [];
 
             // Find the specific invoice
-            const foundInvoice = invoices.find((inv: Invoice) =>
+            // billId can be internal ID or Invoice Number
+            const foundInvoice = (invoices as unknown as Invoice[]).find((inv: Invoice) =>
                 inv.id === billId || inv.invoiceNumber === billId
             );
 
@@ -93,22 +101,29 @@ export default function InvoiceView() {
             }
 
             // Find the customer
-            const foundCustomer = customers.find((cust: Customer) =>
-                cust.id === customerId || cust.id === foundInvoice.customerId
+            const foundCustomer = (customers as unknown as Customer[]).find((cust: Customer) =>
+                cust.id === customerId || cust.id === foundInvoice.customerId || cust.phone === foundInvoice.customerPhone
             );
 
-            if (!foundCustomer) {
-                setError('Customer not found');
-                setLoading(false);
-                return;
+            if (foundCustomer) {
+                setCustomer(foundCustomer);
+            } else {
+                // Fallback if customer deleted but invoice exists
+                setCustomer({
+                    id: foundInvoice.customerId || 'unknown',
+                    name: foundInvoice.customerName || 'Unknown Customer',
+                    phone: foundInvoice.customerPhone || '',
+                    address: foundInvoice.customerAddress || '',
+                    email: '',
+                    gstin: ''
+                });
             }
 
             setInvoice(foundInvoice);
-            setCustomer(foundCustomer);
             setLoading(false);
         } catch (err) {
-            console.error('Error loading invoice:', err);
-            setError('Failed to load invoice data');
+            console.error("Error loading invoice:", err);
+            setError("Failed to load invoice details");
             setLoading(false);
         }
     };
