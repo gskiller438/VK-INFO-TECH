@@ -94,13 +94,11 @@ const mapInvoiceToPrintData = (invoice: Invoice, customer: Customer, _companyDet
 
 import { customerService, type Customer } from '../services/CustomerService';
 import { CustomerBillsAPI } from '../services/CustomerBillsAPI';
-import { authService } from '../services/AuthService';
 
 export default function Customers() {
   const navigate = useNavigate();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerInvoices, setCustomerInvoices] = useState<Invoice[]>([]); // Keep this for "Latest Invoice" calculation
-  const [loading, setLoading] = useState(true);
 
   // Load Customers and Invoices
   useEffect(() => {
@@ -109,7 +107,6 @@ export default function Customers() {
 
   const loadData = async () => {
     try {
-      setLoading(true);
       const [fetchedCustomers, fetchedInvoices] = await Promise.all([
         customerService.getAllCustomers().catch(err => { console.warn("Customers fetch failed", err); return []; }),
         CustomerBillsAPI.getAllInvoices().catch(err => { console.warn("Invoices fetch failed", err); return []; })
@@ -120,8 +117,6 @@ export default function Customers() {
       console.error("Failed to load data", error);
       setCustomers([]);
       setCustomerInvoices([]);
-    } finally {
-      setLoading(false);
     }
   };
 

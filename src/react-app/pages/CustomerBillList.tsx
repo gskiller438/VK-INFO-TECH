@@ -80,8 +80,8 @@ export default function CustomerBillList() {
 
             // Load from API
             const [customersRes, allInvoicesRes] = await Promise.all([
-                customerService.getAllCustomers().catch(e => []),
-                CustomerBillsAPI.getAllInvoices().catch(e => [])
+                customerService.getAllCustomers().catch(() => []),
+                CustomerBillsAPI.getAllInvoices().catch(() => [])
             ]);
 
             const customers = Array.isArray(customersRes) ? customersRes : [];

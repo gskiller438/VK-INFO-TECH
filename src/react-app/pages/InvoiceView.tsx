@@ -81,8 +81,8 @@ export default function InvoiceView() {
 
             // Load from API
             const [invoicesRes, customersRes] = await Promise.all([
-                CustomerBillsAPI.getAllInvoices().catch(e => []),
-                customerService.getAllCustomers().catch(e => [])
+                CustomerBillsAPI.getAllInvoices().catch(() => []),
+                customerService.getAllCustomers().catch(() => [])
             ]);
 
             const invoices = Array.isArray(invoicesRes) ? invoicesRes : [];

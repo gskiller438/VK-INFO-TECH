@@ -4,7 +4,6 @@ import { Save, Trash2, Printer, Edit } from 'lucide-react';
 import { handlePrintInvoice, generateInvoicePDF } from '../components/invoice/InvoicePrintHandler';
 import { CompanyDetails, InvoiceData } from '../types';
 import { productService, Product as InventoryProduct } from '../services/ProductService';
-import { stockService, StockLog } from '../services/StockService';
 import { customerService } from '../services/CustomerService';
 import { BillingAPI } from '../services/BillingAPI';
 import { CustomerBillsAPI } from '../services/CustomerBillsAPI';
@@ -306,7 +305,7 @@ export default function Billing() {
   useEffect(() => {
     const loadCustomers = async () => {
       try {
-        const savedCustomers = await customerService.getAllCustomers().catch(e => []);
+        const savedCustomers = await customerService.getAllCustomers().catch(() => []);
         setCustomers(Array.isArray(savedCustomers) ? savedCustomers : []);
       } catch (error) {
         console.error("Failed to load customers", error);

@@ -11,10 +11,10 @@ export default function Login() {
     const [error, setError] = useState('');
     const navigate = useNavigate();
 
-    const handleLogin = (e: React.FormEvent) => {
+    const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
-        const user = authService.login(username, password);
+        const user = await authService.login(username, password);
         if (user) {
             if (user.role === 'admin') {
                 navigate('/');

@@ -22,13 +22,11 @@ import * as XLSX from 'xlsx';
 
 export default function Products() {
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
 
   // Load products
   // Load products
   const loadProducts = async () => {
     try {
-      setLoading(true);
       const data = await productService.getAllProducts().catch(err => {
         console.error("Error fetching products:", err);
         return [];
@@ -37,8 +35,6 @@ export default function Products() {
     } catch (error) {
       console.error("Failed to load products", error);
       setProducts([]);
-    } finally {
-      setLoading(false);
     }
   };
 
