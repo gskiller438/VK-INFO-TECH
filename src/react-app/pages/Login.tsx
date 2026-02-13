@@ -14,15 +14,16 @@ export default function Login() {
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
-        const user = await authService.login(username, password);
-        if (user) {
-            if (user.role === 'admin') {
+        const result = await authService.login(username, password);
+
+        if (result.success && result.user) {
+            if (result.user.role === 'admin') {
                 navigate('/');
             } else {
                 navigate('/billing');
             }
         } else {
-            setError('Invalid credentials');
+            setError(result.error || 'Invalid credentials');
         }
     };
 

@@ -12,7 +12,7 @@ class AuthService {
     private USER_KEY = 'user';
     private API_URL = `${CONFIG.API_BASE_URL}/auth`;
 
-    async login(username: string, password: string): Promise<User | null> {
+    async login(username: string, password: string): Promise<{ success: boolean; user?: User; error?: string }> {
         try {
             const response = await fetch(`${this.API_URL}/login`, {
                 method: 'POST',
@@ -23,17 +23,24 @@ class AuthService {
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                console.error('Login failed:', errorData.error);
-                return null;
+                let errorMessage = 'Login failed';
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.error || 'Login failed';
+                } catch (e) {
+                    // unexpected non-json error
+                    errorMessage = `Server Error (${response.status})`;
+                }
+                console.error('Login failed:', errorMessage);
+                return { success: false, error: errorMessage };
             }
 
             const user: User = await response.json();
             localStorage.setItem(this.USER_KEY, JSON.stringify(user));
-            return user;
+            return { success: true, user };
         } catch (error) {
-            console.error('Login error:', error);
-            return null;
+            console.error('Login network error:', error);
+            return { success: false, error: 'Network Error: Unable to reach server. Please check your connection.' };
         }
     }
 

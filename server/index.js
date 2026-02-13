@@ -17,8 +17,8 @@ const authRoutes = require('./routes/authRoutes');
 const User = require('./models/User');
 
 const app = express();
-const PORT = 5000;
-const MONGO_URI = 'mongodb://localhost:27017/vkinfotech';
+const PORT = process.env.PORT || 5000;
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/vkinfotech';
 
 app.use(cors());
 app.use(express.json());
@@ -26,15 +26,25 @@ app.use(express.json());
 // =====================
 // MongoDB Connection
 // =====================
-mongoose.connect(MONGO_URI)
-    .then(async () => {
+// =====================
+// MongoDB Connection
+// =====================
+const connectDB = async () => {
+    try {
+        await mongoose.connect(MONGO_URI, {
+            autoIndex: true,
+            maxPoolSize: 10,
+            serverSelectionTimeoutMS: 5000,
+            socketTimeoutMS: 45000,
+            family: 4 // Use IPv4, skip IPv6
+        });
         console.log('✅ Connected to MongoDB: vkinfotech');
         console.log(`   Database: ${MONGO_URI}`);
 
         // Ensure requested default users exist
         const defaultUsers = [
-            { id: 'VK INFOTECH', username: 'VK INFOTECH', password: 'VKINFOTECH123', role: 'admin', name: 'VK INFOTECH ADMIN' },
-            { id: 'VK INFOTECHSTAFF', username: 'VK INFOTECHSTAFF', password: 'VKINFOTECHSTAFF123', role: 'staff', name: 'VK INFOTECH STAFF' }
+            { id: 'VKINFOTECH', username: 'VKINFOTECH', password: 'VKINFOTECH123', role: 'admin', name: 'VK INFOTECH ADMIN' },
+            { id: 'VKINFOTECHSTAFF', username: 'VKINFOTECHSTAFF', password: 'VKINFOTECHSTAFF123', role: 'staff', name: 'VK INFOTECH STAFF' }
         ];
 
         for (const userData of defaultUsers) {
@@ -45,11 +55,37 @@ mongoose.connect(MONGO_URI)
             );
         }
         console.log('✅ Custom default users synchronized');
-    })
-    .catch(err => {
+
+    } catch (err) {
         console.error('❌ MongoDB connection error:', err.message);
-        console.error('   Make sure MongoDB is running on port 27017');
-    });
+        console.error('   Retrying in 5 seconds...');
+        setTimeout(connectDB, 5000); // Retry connection
+    }
+};
+
+// Event Listeners for Stability
+mongoose.connection.on('connected', () => {
+    console.log('✅ MongoDB connected');
+});
+
+mongoose.connection.on('error', (err) => {
+    console.error('❌ MongoDB connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+    console.warn('⚠️ MongoDB disconnected. Attempting to reconnect...');
+});
+
+// Heartbeat Log (Every 60 seconds)
+setInterval(() => {
+    if (mongoose.connection.readyState === 1) {
+        console.log(`[${new Date().toLocaleTimeString()}] ✅ DB Heartbeat: Connected`);
+    } else {
+        console.warn(`[${new Date().toLocaleTimeString()}] ⚠️ DB Heartbeat: Disconnected`);
+    }
+}, 60000);
+
+connectDB();
 
 // =====================
 // API Routes
